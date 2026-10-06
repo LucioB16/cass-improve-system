@@ -31,3 +31,6 @@ temp/
 
 # Local tooling indexes
 .codegraph/
+
+# Harness/session runtime state
+.omo/

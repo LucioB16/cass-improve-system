@@ -493,7 +493,7 @@ Use the real globally installed CASS.
 - [x] Run a 7-day review if the corpus size is reasonable.
 - [x] Validate context-budget behavior on the larger corpus.
 - [ ] If the installed coding-agent tooling allows invoking the installed skill directly, perform an actual invocation from a fresh session/context and validate the UX.
-- [ ] Record end-to-end validation notes in `docs/testing.md`.
+- [x] Record end-to-end validation notes in `docs/testing.md`.
 - [x] Fix defects found during the real review and rerun relevant tests.
 
 ---

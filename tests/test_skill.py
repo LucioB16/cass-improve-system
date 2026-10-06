@@ -57,6 +57,19 @@ class PeriodTest(unittest.TestCase):
 
 
 class PreflightTest(unittest.TestCase):
+    def _run(self, snap, refresh_result=None, refresh_error=None, **kw):
+        with mock.patch.object(cass_adapter, "find_cass", return_value="cass"), \
+             mock.patch.object(cass_adapter, "get_version", return_value=(0, 10, 0)), \
+             mock.patch.object(cass_adapter, "check_capabilities",
+                               return_value=(True, "x")), \
+             mock.patch.object(cass_adapter, "readiness", return_value=snap), \
+             mock.patch.object(cass_adapter, "refresh_index_incremental") as refresh:
+            if refresh_error is not None:
+                refresh.side_effect = refresh_error
+            else:
+                refresh.return_value = refresh_result
+            return preflight.preflight(**kw), refresh
+
     def test_missing_cass_exits_2(self):
         with mock.patch.object(cass_adapter, "find_cass", return_value=None):
             code, msg = preflight.preflight()
@@ -71,24 +84,93 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(code, 3)
         self.assertIn("older", msg)
 
-    def test_uninitialized_index_exits_4(self):
-        with mock.patch.object(cass_adapter, "find_cass", return_value="cass"), \
-             mock.patch.object(cass_adapter, "get_version", return_value=(0, 10, 0)), \
-             mock.patch.object(cass_adapter, "check_capabilities", return_value=(True, "x")), \
-             mock.patch.object(cass_adapter, "health",
-                               return_value={"status": "not_initialized", "initialized": False}):
-            code, msg = preflight.preflight()
+    def test_uninitialized_index_exits_4_no_refresh(self):
+        snap = {"health": {"status": "not_initialized", "initialized": False}, "status": {}}
+        (code, msg), refresh = self._run(snap)
         self.assertEqual(code, 4)
-        self.assertIn("index", msg)
+        self.assertIn("uninitialized", msg)
+        refresh.assert_not_called()
 
     def test_healthy_exits_0(self):
-        with mock.patch.object(cass_adapter, "find_cass", return_value="cass"), \
-             mock.patch.object(cass_adapter, "get_version", return_value=(0, 10, 0)), \
-             mock.patch.object(cass_adapter, "check_capabilities", return_value=(True, "x")), \
-             mock.patch.object(cass_adapter, "health",
-                               return_value={"status": "ok", "initialized": True}):
-            code, msg = preflight.preflight()
+        snap = {"health": {"status": "ok", "initialized": True, "healthy": True,
+                           "errors": []}, "status": {}}
+        (code, msg), refresh = self._run(snap)
         self.assertEqual(code, 0)
+        refresh.assert_not_called()
+
+    def test_stale_only_refreshes_and_proceeds_0(self):
+        snap = {"health": {"status": "unhealthy", "initialized": True, "healthy": False,
+                           "errors": ["index stale"], "db": {"exists": True}}, "status": {}}
+        (code, msg), refresh = self._run(
+            snap, refresh_result={"success": True, "conversations": 5})
+        self.assertEqual(code, 0)
+        refresh.assert_called_once()
+        self.assertIn("auto-refreshed", msg)
+        self.assertIn("Coverage limitations", msg)
+
+    def test_stale_only_failed_refresh_still_proceeds_0(self):
+        snap = {"health": {"status": "unhealthy", "initialized": True, "healthy": False,
+                           "errors": ["index stale"], "db": {"exists": True}}, "status": {}}
+        (code, msg), refresh = self._run(
+            snap, refresh_error=cass_adapter.CassError("locked"))
+        self.assertEqual(code, 0)
+        refresh.assert_called_once()
+        self.assertIn("proceeding anyway", msg)
+
+    def test_stale_strict_mode_exits_4(self):
+        snap = {"health": {"status": "unhealthy", "initialized": True, "healthy": False,
+                           "errors": ["index stale"]}, "status": {}}
+        (code, msg), refresh = self._run(snap, allow_refresh=False)
+        self.assertEqual(code, 4)
+        refresh.assert_not_called()
+
+    def test_broken_index_exits_4_no_refresh(self):
+        snap = {"health": {"status": "unhealthy", "initialized": True, "healthy": False,
+                           "errors": ["index stale", "db open failed"],
+                           "db": {"open_error": "disk I/O error"}}, "status": {}}
+        (code, msg), refresh = self._run(snap)
+        self.assertEqual(code, 4)
+        self.assertIn("genuinely broken", msg)
+        refresh.assert_not_called()
+
+
+class ClassifyTest(unittest.TestCase):
+    def test_healthy(self):
+        state, _ = cass_adapter.classify_readiness(
+            {"health": {"initialized": True, "healthy": True, "errors": []}, "status": {}})
+        self.assertEqual(state, "healthy")
+
+    def test_stale_only(self):
+        state, _ = cass_adapter.classify_readiness(
+            {"health": {"initialized": True, "healthy": False,
+                        "errors": ["index stale"], "db": {"exists": True}},
+             "status": {"pending": {"sessions": 0}}})
+        self.assertEqual(state, "stale")
+
+    def test_stale_plus_other_error_is_broken(self):
+        state, _ = cass_adapter.classify_readiness(
+            {"health": {"initialized": True, "healthy": False,
+                        "errors": ["index stale", "lock-busy"]}, "status": {}})
+        self.assertEqual(state, "broken")
+
+    def test_uninitialized(self):
+        state, _ = cass_adapter.classify_readiness(
+            {"health": {"status": "not_initialized", "initialized": False}, "status": {}})
+        self.assertEqual(state, "uninitialized")
+
+    def test_refresh_is_incremental_only(self):
+        seen = {}
+
+        def fake_run(argv, timeout_s=120, machine_flag="--robot"):
+            seen["argv"] = argv
+            seen["machine_flag"] = machine_flag
+            return {"success": True, "conversations": 2}
+
+        with mock.patch.object(cass_adapter, "run_cass_json", side_effect=fake_run):
+            out = cass_adapter.refresh_index_incremental()
+        self.assertEqual(out["conversations"], 2)
+        self.assertNotIn("--full", seen["argv"])
+        self.assertEqual(seen["machine_flag"], "--json")
 
 
 class AdapterSafetyTest(unittest.TestCase):

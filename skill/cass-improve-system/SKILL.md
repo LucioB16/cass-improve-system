@@ -40,8 +40,11 @@ through `cass_adapter.py` (machine-readable flags, `--no-maintenance`).
 Never run bare `cass` — it launches an interactive TUI.
 
 1. **Preflight** (mandatory, first):
-   `python scripts/preflight.py` — exit 0 means proceed. Any other code:
-   report the message verbatim, stop, do NOT pretend a review happened.
+   `python scripts/preflight.py` — exit 0 means proceed. On stale-only
+   state it runs one bounded incremental `cass index` refresh (writes only
+   CASS derived state, never user data) and continues; any other nonzero
+   code: report the message verbatim, stop, do NOT pretend a review
+   happened. Include any freshness NOTE in the report's Coverage limitations.
 2. **Inventory**: `python scripts/collect_sessions.py --period "last 7 days"`.
    Record coverage (discovered sessions, agents, workspaces). Cap with
    `--limit` on large corpora; report any cap as a coverage limitation.

@@ -60,6 +60,18 @@ is isolated in `skill/cass-improve-system/scripts/cass_adapter.py`.
 
 ## Known upstream issues (affecting the skill design)
 
+- `cass health --json` can report `unhealthy / ["index stale"]` (exit 1)
+  purely on age (observed: age 2608s > 1800s threshold) while
+  `cass status --json` simultaneously reports `index.status: ready`,
+  `fresh: true`, `pending.sessions: 0`. Age-stale with zero pending is
+  usable — the skill treats stale-only state (errors == `["index stale"]`,
+  archive present, no other errors) as refreshable, never as broken.
+- Stale-only refresh is one bounded incremental
+  `cass index --json --no-progress-events` (never `--full`; verified:
+  +5 conversations in ~23s, health green after). This writes only CASS's
+  derived archive/index state and is classified as safe ingestion
+  maintenance; the review itself stays read-only w.r.t. user data.
+
 - `export --include-tools` panics (exit 3221226505) on some DB-backed
   sessions. The adapter falls back to plain `--format json` automatically.
 - Exporting sessions from a **live-mutating session DB** (e.g. opencode's

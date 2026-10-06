@@ -247,3 +247,62 @@ def export_session(
 def health() -> dict:
     result = run_cass_json(["health"], timeout_s=60)
     return result if isinstance(result, dict) else {}
+
+
+def readiness() -> dict:
+    """Combined health + status snapshot used to grade index readiness."""
+    snapshot = {"health": health(), "status": {}}
+    try:
+        status = run_cass_json(["status"], timeout_s=60)
+        if isinstance(status, dict):
+            snapshot["status"] = status
+    except CassError:
+        pass  # status is advisory; classification falls back to health alone
+    return snapshot
+
+
+def classify_readiness(snapshot: dict) -> tuple[str, str]:
+    """Grade CASS readiness. Returns (state, detail) with state in:
+    healthy | stale | uninitialized | broken.
+
+    Only stale EXCLUSIVELY by age (errors == ["index stale"], archive
+    present and openable, no other errors) counts as stale. Anything else
+    unhealthy is broken: a stale label must never mask real damage.
+    """
+    h = snapshot.get("health", {}) or {}
+    s = snapshot.get("status", {}) or {}
+    if not h.get("initialized", False) or h.get("status") in ("not_initialized",) \
+            or s.get("status") in ("not_initialized",):
+        return ("uninitialized",
+                f"index status '{h.get('status', s.get('status', '?'))}': archive not built")
+    if h.get("healthy", False):
+        return ("healthy", "index healthy")
+    errors = [str(e) for e in h.get("errors", []) or []]
+    db = h.get("db", {}) or {}
+    pending = (s.get("pending", {}) or {}).get("sessions", "?")
+    if errors and all("stale" in e.lower() for e in errors) and not db.get("open_error"):
+        return ("stale",
+                f"index stale by age only (pending sessions: {pending}); "
+                "archive present and readable")
+    detail = "; ".join(errors) or h.get("root_cause") or s.get("root_cause") \
+        or h.get("status", "unknown failure")
+    if db.get("open_error"):
+        detail += f" | db open_error: {db['open_error']}"
+    return ("broken", str(detail))
+
+
+def refresh_index_incremental(timeout_s: int = 300) -> dict:
+    """Bounded incremental catch-up for stale-only state.
+
+    Upstream-prescribed (`cass index`, NOT --full) for stale indexes: picks
+    up newly discovered sessions without a rebuild. Writes only CASS's own
+    derived archive/index state; never touches projects, skills, or rules.
+    """
+    result = run_cass_json(["index", "--no-progress-events"],
+                           timeout_s=timeout_s, machine_flag="--json")
+    if not isinstance(result, dict):
+        raise CassError("incremental index refresh returned unexpected output.")
+    if not result.get("success", False):
+        raise CassError("incremental index refresh reported success=false.",
+                        str(result.get("error", ""))[-300:])
+    return result
