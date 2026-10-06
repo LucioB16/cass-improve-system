@@ -1,0 +1,33 @@
+# Python / test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+
+# Review corpora and generated state (never commit live session data)
+.state/
+review-*.json
+review-*.md
+corpus/
+*.corpus.json
+
+# CASS local data (external dependency state)
+*.db
+*.db-*
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.log
+
+# Local tooling indexes
+.codegraph/
