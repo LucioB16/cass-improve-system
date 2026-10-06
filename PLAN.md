@@ -169,9 +169,9 @@ This is an intended structure, not a hard requirement. Change it when implementa
 - [x] Keep CASS-specific parsing isolated from the reasoning/policy layer so upstream CLI changes are easier to adapt.
 - [x] Ensure temporary review artifacts are not accidentally committed.
 - [x] Decide and document a stable location for optional review state/output. Prefer a user-global location associated with `.agents`, e.g. `~/.agents/state/cass-improve-system/`, rather than polluting whichever project happens to be the current working directory.
-- [ ] Commit the coherent project scaffold.
-- [ ] Create or connect the public GitHub repository and push.
-- [ ] Verify the repository is publicly accessible with `gh repo view LucioB16/cass-improve-system`.
+- [x] Commit the coherent project scaffold.
+- [x] Create or connect the public GitHub repository and push.
+- [x] Verify the repository is publicly accessible with `gh repo view LucioB16/cass-improve-system`.
 
 ---
 
@@ -504,33 +504,33 @@ Create a polished GitHub README comparable to a high-quality open-source develop
 
 It must include:
 
-- [ ] Strong project title and concise tagline.
-- [ ] Shields/badges appropriate for a public repository, including at least license and relevant GitHub health/activity badges.
-- [ ] Brief explanation of the problem: coding-agent knowledge is fragmented across many sessions/projects.
-- [ ] Clear explanation that this is **batch retrospective analysis**, not an in-session hook.
-- [ ] A compact architecture/workflow diagram.
-- [ ] Feature list.
-- [ ] CASS dependency section.
-- [ ] Explicit statement that CASS must already be installed/available and is a separate upstream project.
-- [ ] Link to:
+- [x] Strong project title and concise tagline.
+- [x] Shields/badges appropriate for a public repository, including at least license and relevant GitHub health/activity badges.
+- [x] Brief explanation of the problem: coding-agent knowledge is fragmented across many sessions/projects.
+- [x] Clear explanation that this is **batch retrospective analysis**, not an in-session hook.
+- [x] A compact architecture/workflow diagram.
+- [x] Feature list.
+- [x] CASS dependency section.
+- [x] Explicit statement that CASS must already be installed/available and is a separate upstream project.
+- [x] Link to:
   `https://github.com/Dicklesworthstone/coding_agent_session_search`
-- [ ] Installation instructions for CASS.
-- [ ] Skill installation instructions for generic `.agents`.
-- [ ] Skill installation instructions for Claude Code `.claude`.
-- [ ] Usage examples:
+- [x] Installation instructions for CASS.
+- [x] Skill installation instructions for generic `.agents`.
+- [x] Skill installation instructions for Claude Code `.claude`.
+- [x] Usage examples:
   - last 24 hours
   - last 7 days
   - explicit range
   - optional project/agent filtering
-- [ ] Explanation of how the analysis works.
-- [ ] Explanation of read-only/default safety behavior.
-- [ ] Description of output/recommendation categories.
-- [ ] Dependencies.
-- [ ] Repository structure.
-- [ ] Development/testing instructions.
-- [ ] License.
-- [ ] Acknowledgement that CASS is a separate dependency with its own license/terms.
-- [ ] No unsupported claims about compatibility.
+- [x] Explanation of how the analysis works.
+- [x] Explanation of read-only/default safety behavior.
+- [x] Description of output/recommendation categories.
+- [x] Dependencies.
+- [x] Repository structure.
+- [x] Development/testing instructions.
+- [x] License.
+- [x] Acknowledgement that CASS is a separate dependency with its own license/terms.
+- [x] No unsupported claims about compatibility.
 
 ## Mandatory agent-install prompt in README
 
@@ -548,9 +548,9 @@ Otherwise, prefer the shared global path ~/.agents/skills/cass-improve-system/.
 Run the repository's verification steps after installation and report the installed CASS version, skill path, and validation result.
 ```
 
-- [ ] Ensure this prompt contains the final public repository URL.
-- [ ] Ensure the README renders correctly on GitHub.
-- [ ] Verify all links and badge URLs after publishing.
+- [x] Ensure this prompt contains the final public repository URL.
+- [x] Ensure the README renders correctly on GitHub.
+- [x] Verify all links and badge URLs after publishing.
 
 Treat the README requirements in this phase as authoritative; create any supporting documentation files needed during implementation.
 
@@ -558,24 +558,24 @@ Treat the README requirements in this phase as authoritative; create any support
 
 # Phase 14 — License and attribution
 
-- [ ] Use an MIT license for `cass-improve-system` unless discovery reveals a concrete incompatibility requiring a different permissive license.
-- [ ] Do not copy CASS code into this repository merely for convenience.
-- [ ] Treat CASS as an external executable dependency.
-- [ ] Clearly attribute and link to CASS.
-- [ ] Do not imply that this project is affiliated with or endorsed by CASS upstream.
-- [ ] If any upstream snippets are copied, verify their license/terms and add appropriate attribution before committing them.
-- [ ] Verify the final `LICENSE` file and README licensing language agree.
+- [x] Use an MIT license for `cass-improve-system` unless discovery reveals a concrete incompatibility requiring a different permissive license.
+- [x] Do not copy CASS code into this repository merely for convenience.
+- [x] Treat CASS as an external executable dependency.
+- [x] Clearly attribute and link to CASS.
+- [x] Do not imply that this project is affiliated with or endorsed by CASS upstream.
+- [x] If any upstream snippets are copied, verify their license/terms and add appropriate attribution before committing them.
+- [x] Verify the final `LICENSE` file and README licensing language agree.
 
 ---
 
 # Phase 15 — GitHub publication quality
 
-- [ ] Ensure the repository is public.
-- [ ] Use meaningful commits rather than one giant final commit.
-- [ ] Push all intended source/docs/tests.
-- [ ] Confirm there are no secrets, local transcript data, CASS indexes, generated review corpora, absolute private paths, or credentials in Git history.
-- [ ] Set a concise GitHub repository description.
-- [ ] Add sensible GitHub topics such as:
+- [x] Ensure the repository is public.
+- [x] Use meaningful commits rather than one giant final commit.
+- [x] Push all intended source/docs/tests.
+- [x] Confirm there are no secrets, local transcript data, CASS indexes, generated review corpora, absolute private paths, or credentials in Git history.
+- [x] Set a concise GitHub repository description.
+- [x] Add sensible GitHub topics such as:
   - `ai-agents`
   - `coding-agents`
   - `agent-skills`
@@ -584,11 +584,11 @@ Treat the README requirements in this phase as authoritative; create any support
   - `opencode`
   - `cass`
   - `developer-tools`
-- [ ] Verify the default branch and repository visibility.
-- [ ] Verify README badges and links from the public GitHub view.
-- [ ] Verify `LICENSE` is detected correctly by GitHub.
-- [ ] Run tests from a clean checkout if feasible.
-- [ ] Run the installer/verification from a clean checkout if feasible.
+- [x] Verify the default branch and repository visibility.
+- [x] Verify README badges and links from the public GitHub view.
+- [x] Verify `LICENSE` is detected correctly by GitHub.
+- [x] Run tests from a clean checkout if feasible.
+- [x] Run the installer/verification from a clean checkout if feasible.
 
 ---
 
@@ -596,28 +596,28 @@ Treat the README requirements in this phase as authoritative; create any support
 
 The project is complete only when all of the following are true:
 
-- [ ] Public repository exists at `https://github.com/LucioB16/cass-improve-system`.
-- [ ] Repository is owned by `LucioB16`.
-- [ ] CASS is installed globally/user-globally and works from a new shell.
-- [ ] CASS is treated as an external prerequisite, not vendored.
-- [ ] The skill checks for CASS before attempting analysis.
-- [ ] Missing/incompatible CASS produces an actionable failure.
-- [ ] The skill can review all CASS-visible sessions in a requested time period across projects.
-- [ ] The skill performs cross-session/cross-project improvement analysis rather than simple summarization.
-- [ ] The skill produces evidence-backed recommendations for rules, automations and skills.
-- [ ] The default run is read-only.
-- [ ] The skill is globally installed under `~/.agents/skills/cass-improve-system/`.
-- [ ] Claude Code installation path is documented and verified if Claude Code is present.
-- [ ] Deterministic automated tests pass.
-- [ ] At least one real 24h end-to-end review succeeds.
-- [ ] A larger review (preferably 7 days) is validated or any corpus-size limitation is documented.
-- [ ] README is polished, complete, and includes the public-repo installation prompt.
-- [ ] MIT `LICENSE` is present and correct.
-- [ ] No private session content or credentials were committed.
-- [ ] All plan checkboxes that are genuinely complete are marked `[x]`.
-- [ ] Final changes are committed and pushed.
-- [ ] `git status` is clean.
-- [ ] Final report to the user includes:
+- [x] Public repository exists at `https://github.com/LucioB16/cass-improve-system`.
+- [x] Repository is owned by `LucioB16`.
+- [x] CASS is installed globally/user-globally and works from a new shell.
+- [x] CASS is treated as an external prerequisite, not vendored.
+- [x] The skill checks for CASS before attempting analysis.
+- [x] Missing/incompatible CASS produces an actionable failure.
+- [x] The skill can review all CASS-visible sessions in a requested time period across projects.
+- [x] The skill performs cross-session/cross-project improvement analysis rather than simple summarization.
+- [x] The skill produces evidence-backed recommendations for rules, automations and skills.
+- [x] The default run is read-only.
+- [x] The skill is globally installed under `~/.agents/skills/cass-improve-system/`.
+- [x] Claude Code installation path is documented and verified if Claude Code is present.
+- [x] Deterministic automated tests pass.
+- [x] At least one real 24h end-to-end review succeeds.
+- [x] A larger review (preferably 7 days) is validated or any corpus-size limitation is documented.
+- [x] README is polished, complete, and includes the public-repo installation prompt.
+- [x] MIT `LICENSE` is present and correct.
+- [x] No private session content or credentials were committed.
+- [x] All plan checkboxes that are genuinely complete are marked `[x]`.
+- [x] Final changes are committed and pushed.
+- [x] `git status` is clean.
+- [x] Final report to the user includes:
   - repository URL
   - installed skill path
   - CASS version/path
