@@ -318,6 +318,14 @@ class NormalizeTest(unittest.TestCase):
             with mock.patch.object(sys, "stdout", io.StringIO()):
                 self.assertEqual(normalize_cass.main([]), 2)
 
+    def test_utf16_piped_input_tolerated(self):
+        payload = '{"period": {}, "sessions": [], "coverage": {}}'.encode("utf-16")
+        stdin = mock.Mock()
+        stdin.buffer.read.return_value = payload
+        with mock.patch.object(sys, "stdin", stdin):
+            self.assertEqual(normalize_cass._read_stdin_text(),
+                             '{"period": {}, "sessions": [], "coverage": {}}')
+
     def test_export_failure_counted_not_crash(self):
         inv = {"period": {}, "sessions": [{"path": "p", "agent": "a", "workspace": "w"}],
                "coverage": {}}

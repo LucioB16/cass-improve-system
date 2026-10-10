@@ -108,7 +108,14 @@ def extract_signals(role: str, text: str, ref: str) -> list[dict]:
 def _read_stdin_text() -> str:
     stream = getattr(sys.stdin, "buffer", sys.stdin)
     data = stream.read()
-    return data.decode("utf-8") if isinstance(data, bytes) else data
+    if isinstance(data, bytes):
+        # Tolerate UTF-16 piped input (e.g. PowerShell `>` redirection
+        # produces UTF-16LE); the pipeline itself always emits UTF-8.
+        if data[:2] in (b"\xff\xfe", b"\xfe\xff") or (
+                b"\x00" in data[:100] and b"\x00" in data[1:100]):
+            return data.decode("utf-16")
+        return data.decode("utf-8")
+    return data
 
 
 def normalize_one(entry: dict, timeout_s: int = 120) -> dict:

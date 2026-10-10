@@ -5,19 +5,25 @@ Model:
     <home>/.agents/skills/cass-improve-system/   = canonical physical skill
     <home>/.claude/skills/cass-improve-system    = compatibility link (junction
                                                   on Windows, symlink on POSIX)
+    <home>/.cline/skills/cass-improve-system     = compatibility link (junction
+                                                  on Windows, symlink on POSIX)
 
 Thin per-OS launchers (install-skill.ps1 / install-skill.sh) delegate here
 so behavior cannot diverge between platforms.
 
 Safety rules:
-- The Claude path is a link, never a second copy.
+- Every compatibility path is a link (or resolves through one), never a
+  second copy.
 - An existing correct link is accepted (idempotent reinstall).
+- A path that resolves to canonical through a parent-level link
+  (resolved-alias) is accepted and never modified or removed by this tool:
+  only its owner may change it.
 - A broken link is repaired.
-- A link pointing elsewhere, or a physically divergent Claude tree, FAILS
+- A link pointing elsewhere, or a physically divergent tree, FAILS
   safely instead of being overwritten blindly.
-- A physically identical Claude tree is migrated to a link (byte-identity
-  proven first via manifest).
-- Uninstalling the Claude link never touches the canonical directory.
+- A physically identical, genuinely separate tree is migrated to a link
+  (byte-identity proven first via manifest), except in uninstall paths.
+- Uninstalling a compatibility link never touches the canonical directory.
 """
 
 from __future__ import annotations
@@ -49,15 +55,32 @@ def canonical_dir(home: str) -> str:
     return os.path.join(home, ".agents", "skills", SKILL_DIRNAME)
 
 
+CONSUMERS = ("claude", "cline")
+CONSUMER_ROOTS = {"claude": ".claude", "cline": ".cline"}
+
+
+def consumer_dir(home: str, consumer: str) -> str:
+    if consumer not in CONSUMERS:
+        raise InstallError(f"unknown consumer: {consumer}")
+    return os.path.join(home, CONSUMER_ROOTS[consumer], "skills", SKILL_DIRNAME)
+
+
 def claude_dir(home: str) -> str:
-    return os.path.join(home, ".claude", "skills", SKILL_DIRNAME)
+    return consumer_dir(home, "claude")
+
+
+def cline_dir(home: str) -> str:
+    return consumer_dir(home, "cline")
 
 
 def _is_windows_junction(path: str) -> bool:
     if os.name != "nt":
         return False
     try:
-        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+        func = ctypes.windll.kernel32.GetFileAttributesW
+        func.restype = ctypes.c_uint32  # DWORD; default c_int turns -1 into truthy
+        func.argtypes = [ctypes.c_wchar_p]
+        attrs = func(str(path))
     except (AttributeError, OSError):
         return False
     return attrs != 0xFFFFFFFF and bool(attrs & 0x400)
@@ -131,10 +154,25 @@ def remove_link_only(link: str) -> None:
     raise InstallError(f"refusing to remove non-link: {link}")
 
 
-def classify_claude_path(link: str, canonical: str) -> tuple[str, str]:
-    """Classify the Claude path. States: missing | correct-link |
-    broken-link | wrong-link | physical-identical | physical-divergent |
-    blocking-file."""
+def _is_same_tree(path: str, canonical: str) -> bool:
+    """True when path and canonical are the same filesystem object (e.g. the
+    path resolves through a parent-level junction/symlink). Read-only."""
+    try:
+        return os.path.samefile(path, canonical)
+    except OSError:
+        return False
+
+
+def classify_link_path(link: str, canonical: str, consumer: str = "claude") -> tuple[str, str]:
+    """Classify a compatibility path. States: missing | correct-link |
+    resolved-alias | broken-link | wrong-link | physical-identical |
+    physical-divergent | blocking-file.
+
+    resolved-alias = not itself a link, but resolves to canonical (typically
+    a parent directory is the actual link). Accepted everywhere a correct
+    link is, and never modified or removed by this tool.
+    """
+    label = f"{consumer}-link"
     if os.path.lexists(link):
         if is_link(link):
             if not os.path.exists(link):
@@ -143,6 +181,9 @@ def classify_claude_path(link: str, canonical: str) -> tuple[str, str]:
                 return ("correct-link", f"resolves to {os.path.realpath(link)}")
             return ("wrong-link", f"resolves to {os.path.realpath(link)}")
         if os.path.isdir(link):
+            if _same_target(link, canonical):
+                return ("resolved-alias",
+                        f"resolves to canonical through a parent link ({label} untouched)")
             src_manifest = manifest_tree(canonical) if os.path.isdir(canonical) else {}
             diff = manifest_diff(manifest_tree(link), src_manifest)
             if not diff and src_manifest:
@@ -151,6 +192,10 @@ def classify_claude_path(link: str, canonical: str) -> tuple[str, str]:
             return ("physical-divergent", detail or "empty or unreadable copy")
         return ("blocking-file", "exists and is not a directory")
     return ("missing", "nothing installed")
+
+
+def classify_claude_path(link: str, canonical: str) -> tuple[str, str]:
+    return classify_link_path(link, canonical, "claude")
 
 
 def install_canonical(source: str, home: str, force: bool = False) -> str:
@@ -171,15 +216,15 @@ def install_canonical(source: str, home: str, force: bool = False) -> str:
     return dest
 
 
-def ensure_claude_link(home: str) -> tuple[str, str]:
-    """Ensure the Claude compatibility link. Returns (action, detail) with
-    action in created|accepted|repaired|migrated."""
-    link = claude_dir(home)
+def ensure_consumer_link(home: str, consumer: str) -> tuple[str, str]:
+    """Ensure a compatibility link. Returns (action, detail) with action in
+    created|accepted|repaired|migrated."""
+    link = consumer_dir(home, consumer)
     canonical = canonical_dir(home)
     if not os.path.isdir(canonical) or is_link(canonical):
         raise InstallError(f"canonical installation missing: {canonical}")
-    state, detail = classify_claude_path(link, canonical)
-    if state == "correct-link":
+    state, detail = classify_link_path(link, canonical, consumer)
+    if state in ("correct-link", "resolved-alias"):
         return ("accepted", detail)
     if state == "missing":
         create_link(link, canonical)
@@ -189,12 +234,19 @@ def ensure_claude_link(home: str) -> tuple[str, str]:
         create_link(link, canonical)
         return ("repaired", f"was broken ({detail}); recreated")
     if state == "physical-identical":
+        if _is_same_tree(link, canonical):
+            raise InstallError(
+                f"refusing to migrate {consumer} path that aliases canonical: {link}")
         shutil.rmtree(link, ignore_errors=False)
         create_link(link, canonical)
         return ("migrated", "identical physical copy replaced by link")
     raise InstallError(
-        f"refusing to touch Claude path ({state}: {detail}); "
+        f"refusing to touch {consumer} path ({state}: {detail}); "
         "back it up or remove it manually, then re-run")
+
+
+def ensure_claude_link(home: str) -> tuple[str, str]:
+    return ensure_consumer_link(home, "claude")
 
 
 def verify_installation(source: str, home: str) -> tuple[list[str], list[str]]:
@@ -205,27 +257,33 @@ def verify_installation(source: str, home: str) -> tuple[list[str], list[str]]:
     if not os.path.isdir(canonical) or is_link(canonical):
         return ([f"MISSING canonical installation: {canonical}"], notes)
     problems.extend(manifest_diff(manifest_tree(canonical), manifest_tree(source)))
-    link = claude_dir(home)
-    state, detail = classify_claude_path(link, canonical)
-    if state == "missing":
-        notes.append("no Claude compatibility link (canonical copy is complete)")
-    elif state != "correct-link":
-        problems.append(f"{state} claude-link: {detail}")
-    else:
-        notes.append(f"claude-link: {detail}")
+    for consumer in CONSUMERS:
+        link = consumer_dir(home, consumer)
+        state, detail = classify_link_path(link, canonical, consumer)
+        if state == "missing":
+            notes.append(f"no {consumer} compatibility link (canonical copy is complete)")
+        elif state in ("correct-link", "resolved-alias"):
+            notes.append(f"{consumer}: VERIFIED -> canonical ({detail})")
+        else:
+            problems.append(f"{state} {consumer}-link: {detail}")
     return (problems, notes)
 
 
+LINK_TARGETS = ("claude", "cline")
+
+
 def uninstall(home: str, target: str, force: bool = False) -> str:
-    if target == "claude":
-        link = claude_dir(home)
+    if target in LINK_TARGETS:
+        link = consumer_dir(home, target)
         if not os.path.lexists(link):
-            return "claude-link: nothing installed"
+            return f"{target}-link: nothing installed"
         if not is_link(link):
             raise InstallError(
-                f"refusing to remove physical Claude tree without review: {link}")
+                f"refusing to remove non-link {target} path without review: {link} "
+                "(it may alias canonical through a parent link; only its owner "
+                "may change it)")
         remove_link_only(link)
-        return "claude-link: removed (canonical untouched)"
+        return f"{target}-link: removed (canonical untouched)"
     if target == "agents":
         dest = canonical_dir(home)
         if not os.path.lexists(dest):
@@ -240,6 +298,30 @@ def uninstall(home: str, target: str, force: bool = False) -> str:
     raise InstallError(f"unknown uninstall target: {target}")
 
 
+def _install_plan(target: str) -> tuple[bool, list[str]]:
+    """Return (install_canonical, consumers). both keeps its historical
+    meaning (agents + claude); all adds cline."""
+    if target == "agents":
+        return (True, [])
+    if target == "claude":
+        return (False, ["claude"])
+    if target == "cline":
+        return (False, ["cline"])
+    if target == "both":
+        return (True, ["claude"])
+    if target == "all":
+        return (True, ["claude", "cline"])
+    raise InstallError(f"unknown install target: {target}")
+
+
+def _uninstall_order(target: str) -> list[str]:
+    if target == "both":
+        return ["claude", "agents"]  # historical meaning preserved
+    if target == "all":
+        return ["claude", "cline", "agents"]  # links first, canonical last
+    return [target]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Canonical skill installer.")
     common = argparse.ArgumentParser(add_help=False)
@@ -249,26 +331,28 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p_install = sub.add_parser("install", parents=[common])
     p_install.add_argument("--target", default="both",
-                           choices=["agents", "both", "claude"])
+                           choices=["agents", "both", "claude", "cline", "all"])
     sub.add_parser("verify", parents=[common])
     p_uninstall = sub.add_parser("uninstall", parents=[common])
     p_uninstall.add_argument("--target", default="claude",
-                             choices=["agents", "both", "claude"])
+                             choices=["agents", "both", "claude", "cline", "all"])
     args = parser.parse_args(argv)
     home = os.path.abspath(os.path.expanduser(args.home or "~"))
     source = os.path.abspath(args.source or default_source())
     try:
         if args.command == "install":
-            if args.target in ("agents", "both"):
+            want_canonical, want_links = _install_plan(args.target)
+            if want_canonical:
                 dest = install_canonical(source, home, force=args.force)
                 print(f"canonical: {dest}")
-            if args.target in ("both", "claude"):
-                action, detail = ensure_claude_link(home)
-                print(f"claude-link: {action} ({detail})")
+            for consumer in want_links:
+                action, detail = ensure_consumer_link(home, consumer)
+                print(f"{consumer}-link: {action} ({detail})")
         elif args.command == "verify":
             problems, notes = verify_installation(source, home)
+            print("canonical:")
             for note in notes:
-                print(f"note: {note}")
+                print(f"  note: {note}")
             if problems:
                 print("VERIFICATION FAILED:")
                 for problem in problems:
@@ -276,11 +360,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             print(f"verified: {canonical_dir(home)} byte-identical to source")
         elif args.command == "uninstall":
-            if args.target == "both":
-                print(uninstall(home, "claude", force=args.force))
-                print(uninstall(home, "agents", force=args.force))
-            else:
-                print(uninstall(home, args.target, force=args.force))
+            for step in _uninstall_order(args.target):
+                print(uninstall(home, step, force=args.force))
     except InstallError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

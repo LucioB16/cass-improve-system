@@ -74,6 +74,33 @@ deterministic order; standalone `~/.agents` discovery had already been
 proven separately, and both installed copies were previously verified
 byte-identical.
 
+## Cline fresh-session acceptance (PASSED, Cline 3.0.68 — already completed)
+
+- Cline recognized `cass-improve-system` via its normal native Skill mechanism.
+- Cline-visible path: `C:\Users\lucio\.cline\skills\cass-improve-system\`
+  (resolves to the canonical `.agents` tree through a parent-level
+  compatibility junction; no Skill modification needed).
+- Full stock workflow ran: Preflight → Inventory → Normalize → Aggregate → Report.
+- CASS 0.10.0; 13 sessions discovered, 13 analyzed, 11 WAL-recovered,
+  0 skipped; 2 agents, 6 workspaces.
+- 0 high-confidence recommendations; 3 watch-list candidates, all correctly
+  rejected after evidence inspection; 231 singles remained do-not-promote.
+- No durable project/Skill/repository/learned-knowledge modifications.
+- Result: PASS — Cline discovered and executed the globally installed
+  skill end-to-end with no Cline-specific changes.
+
+Distinguish: the above is the real Windows Cline E2E; filesystem/install
+behavior on Windows/Linux/macOS is covered separately by CI with isolated
+HOME directories (no Cline or private history required).
+
+## Windows UTF-8 shell note
+
+PowerShell `>` redirection can produce UTF-16 files while the pipeline
+expects UTF-8 JSON. The workflow itself never depends on redirection
+(pipes + UTF-8 byte I/O throughout); as a minimal safeguard the pipeline
+entry points additionally accept UTF-16 BOM/sniffed input. No Skill change
+was needed for the Cline acceptance test.
+
 ## Earlier validation history (superseded where noted)
 
 - Preflight: exit 0. Stale-only state observed live (`healthy:false`,

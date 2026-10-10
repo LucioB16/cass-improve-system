@@ -88,6 +88,8 @@ class InstallTest(unittest.TestCase):
 
 
 class LinkTest(unittest.TestCase):
+    CONSUMERS = ("claude", "cline")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="fake home ")
         self.home = self.tmp.name
@@ -97,99 +99,227 @@ class LinkTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def _link(self, consumer):
+        return skill_install.consumer_dir(self.home, consumer)
+
+    def _make_dangling(self, link, target):
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        if os.name == "nt":
+            import subprocess
+            subprocess.run(["cmd", "/c", "mklink", "/J", link, target],
+                           check=True, capture_output=True)
+        else:
+            os.symlink(target, link)
+
     def test_create_and_accept_link(self):
-        action, _ = skill_install.ensure_claude_link(self.home)
-        self.assertEqual(action, "created")
-        self.assertTrue(skill_install.is_link(skill_install.claude_dir(self.home)))
-        action, _ = skill_install.ensure_claude_link(self.home)
-        self.assertEqual(action, "accepted")
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                action, _ = skill_install.ensure_consumer_link(self.home, consumer)
+                self.assertEqual(action, "created")
+                self.assertTrue(skill_install.is_link(self._link(consumer)))
+                action, _ = skill_install.ensure_consumer_link(self.home, consumer)
+                self.assertEqual(action, "accepted")
 
     def test_broken_link_repaired(self):
-        link = skill_install.claude_dir(self.home)
-        os.makedirs(os.path.dirname(link), exist_ok=True)
-        if os.name == "nt":
-            import subprocess
-            subprocess.run(["cmd", "/c", "mklink", "/J", link,
-                            os.path.join(self.home, "nope")],
-                           check=True, capture_output=True)
-        else:
-            os.symlink(os.path.join(self.home, "nope"), link)
-        state, _ = skill_install.classify_claude_path(
-            link, skill_install.canonical_dir(self.home))
-        self.assertEqual(state, "broken-link")
-        action, _ = skill_install.ensure_claude_link(self.home)
-        self.assertEqual(action, "repaired")
-        state, _ = skill_install.classify_claude_path(
-            link, skill_install.canonical_dir(self.home))
-        self.assertEqual(state, "correct-link")
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                link = self._link(consumer)
+                self._make_dangling(link, os.path.join(self.home, "nope"))
+                state, _ = skill_install.classify_link_path(
+                    link, skill_install.canonical_dir(self.home), consumer)
+                self.assertEqual(state, "broken-link")
+                action, _ = skill_install.ensure_consumer_link(self.home, consumer)
+                self.assertEqual(action, "repaired")
+                state, _ = skill_install.classify_link_path(
+                    link, skill_install.canonical_dir(self.home), consumer)
+                self.assertEqual(state, "correct-link")
 
     def test_wrong_target_fails_safely(self):
-        other = os.path.join(self.home, "other")
-        os.makedirs(other)
-        link = skill_install.claude_dir(self.home)
-        os.makedirs(os.path.dirname(link), exist_ok=True)
-        if os.name == "nt":
-            import subprocess
-            subprocess.run(["cmd", "/c", "mklink", "/J", link, other],
-                           check=True, capture_output=True)
-        else:
-            os.symlink(other, link)
-        state, _ = skill_install.classify_claude_path(
-            link, skill_install.canonical_dir(self.home))
-        self.assertEqual(state, "wrong-link")
-        with self.assertRaises(skill_install.InstallError):
-            skill_install.ensure_claude_link(self.home)
-        self.assertTrue(os.path.isdir(other))  # untouched
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                other = os.path.join(self.home, f"other-{consumer}")
+                os.makedirs(other)
+                link = self._link(consumer)
+                self._make_dangling(link, other)
+                state, _ = skill_install.classify_link_path(
+                    link, skill_install.canonical_dir(self.home), consumer)
+                self.assertEqual(state, "wrong-link")
+                with self.assertRaises(skill_install.InstallError):
+                    skill_install.ensure_consumer_link(self.home, consumer)
+                self.assertTrue(os.path.isdir(other))  # untouched
+
+    def test_blocking_file_fails_safely(self):
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                link = self._link(consumer)
+                os.makedirs(os.path.dirname(link), exist_ok=True)
+                with open(link, "w") as fh:
+                    fh.write("file in the way")
+                state, _ = skill_install.classify_link_path(
+                    link, skill_install.canonical_dir(self.home), consumer)
+                self.assertEqual(state, "blocking-file")
+                with self.assertRaises(skill_install.InstallError):
+                    skill_install.ensure_consumer_link(self.home, consumer)
 
     def test_identical_physical_tree_migrates(self):
-        import shutil
-        link = skill_install.claude_dir(self.home)
-        shutil.copytree(skill_install.canonical_dir(self.home), link)
-        state, _ = skill_install.classify_claude_path(
-            link, skill_install.canonical_dir(self.home))
-        self.assertEqual(state, "physical-identical")
-        action, _ = skill_install.ensure_claude_link(self.home)
-        self.assertEqual(action, "migrated")
-        self.assertTrue(skill_install.is_link(link))
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                import shutil
+                link = self._link(consumer)
+                shutil.copytree(skill_install.canonical_dir(self.home), link)
+                state, _ = skill_install.classify_link_path(
+                    link, skill_install.canonical_dir(self.home), consumer)
+                self.assertEqual(state, "physical-identical")
+                action, _ = skill_install.ensure_consumer_link(self.home, consumer)
+                self.assertEqual(action, "migrated")
+                self.assertTrue(skill_install.is_link(link))
 
     def test_divergent_physical_tree_fails_safely(self):
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                import shutil
+                link = self._link(consumer)
+                shutil.copytree(skill_install.canonical_dir(self.home), link)
+                with open(os.path.join(link, "SKILL.md"), "w") as fh:
+                    fh.write("user changes")
+                state, _ = skill_install.classify_link_path(
+                    link, skill_install.canonical_dir(self.home), consumer)
+                self.assertEqual(state, "physical-divergent")
+                with self.assertRaises(skill_install.InstallError):
+                    skill_install.ensure_consumer_link(self.home, consumer)
+                with open(os.path.join(link, "SKILL.md")) as fh:
+                    self.assertEqual(fh.read(), "user changes")  # preserved
+
+    def test_resolved_alias_accepted_never_modified(self):
+        # A consumer path that resolves to canonical through a parent-level
+        # link (not itself a link) must be accepted and must refuse removal.
         import shutil
-        link = skill_install.claude_dir(self.home)
-        shutil.copytree(skill_install.canonical_dir(self.home), link)
-        with open(os.path.join(link, "SKILL.md"), "w") as fh:
-            fh.write("user changes")
-        state, _ = skill_install.classify_claude_path(
-            link, skill_install.canonical_dir(self.home))
-        self.assertEqual(state, "physical-divergent")
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                home_b = os.path.join(self.tmp.name, f"home-{consumer}")
+                canonical = skill_install.install_canonical(self.source, home_b)
+                link = skill_install.consumer_dir(home_b, consumer)
+                parent_link = os.path.dirname(link)
+                os.makedirs(os.path.dirname(parent_link), exist_ok=True)
+                if os.name == "nt":
+                    import subprocess
+                    subprocess.run(
+                        ["cmd", "/c", "mklink", "/J", parent_link,
+                         os.path.dirname(canonical)],
+                        check=True, capture_output=True)
+                else:
+                    os.symlink(os.path.dirname(canonical), parent_link)
+                self.assertFalse(skill_install.is_link(link))
+                state, _ = skill_install.classify_link_path(
+                    link, canonical, consumer)
+                self.assertEqual(state, "resolved-alias")
+                action, _ = skill_install.ensure_consumer_link(home_b, consumer)
+                self.assertEqual(action, "accepted")
+                with self.assertRaises(skill_install.InstallError):
+                    skill_install.uninstall(home_b, consumer)
+                self.assertTrue(os.path.isfile(os.path.join(canonical, "SKILL.md")))
+
+    def test_parent_level_alias_accepted_and_uninstall_refused(self):
+        # Faithful replica of a parent-level compatibility junction:
+        # <home>/.cline/skills -> <home>/.agents/skills. The consumer path
+        # itself is not a link but resolves to canonical.
+        import shutil
+        home_b = os.path.join(self.tmp.name, "homeB")
+        canonical = skill_install.install_canonical(self.source, home_b)
+        parent_link = os.path.join(home_b, ".cline", "skills")
+        os.makedirs(os.path.dirname(parent_link), exist_ok=True)
+        if os.name == "nt":
+            import subprocess
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", parent_link,
+                 os.path.dirname(canonical)],
+                check=True, capture_output=True)
+        else:
+            os.symlink(os.path.dirname(canonical), parent_link)
+        link = skill_install.consumer_dir(home_b, "cline")
+        self.assertFalse(skill_install.is_link(link))
+        state, _ = skill_install.classify_link_path(link, canonical, "cline")
+        self.assertEqual(state, "resolved-alias")
+        action, _ = skill_install.ensure_consumer_link(home_b, "cline")
+        self.assertEqual(action, "accepted")
+        problems, _ = skill_install.verify_installation(self.source, home_b)
+        self.assertEqual(problems, [])
         with self.assertRaises(skill_install.InstallError):
-            skill_install.ensure_claude_link(self.home)
-        with open(os.path.join(link, "SKILL.md")) as fh:
-            self.assertEqual(fh.read(), "user changes")  # preserved
+            skill_install.uninstall(home_b, "cline")
+        self.assertTrue(os.path.isfile(os.path.join(canonical, "SKILL.md")))
+
+    def test_is_link_false_for_missing_path(self):
+        # Regression: DWORD sign handling must not report ghosts as links.
+        self.assertFalse(skill_install.is_link(
+            os.path.join(self.home, "does", "not", "exist")))
 
     def test_link_without_canonical_fails(self):
         import shutil
         shutil.rmtree(skill_install.canonical_dir(self.home))
-        with self.assertRaises(skill_install.InstallError):
-            skill_install.ensure_claude_link(self.home)
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                with self.assertRaises(skill_install.InstallError):
+                    skill_install.ensure_consumer_link(self.home, consumer)
+
+    def test_all_installs_everything(self):
+        code = skill_install.main([
+            "install", "--target", "all", "--home", self.home,
+            "--source", self.source, "--force"])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.isfile(
+            os.path.join(skill_install.canonical_dir(self.home), "SKILL.md")))
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                self.assertTrue(skill_install.is_link(self._link(consumer)))
+
+    def test_both_unchanged_excludes_cline(self):
+        code = skill_install.main([
+            "install", "--target", "both", "--home", self.home,
+            "--source", self.source, "--force"])
+        self.assertEqual(code, 0)
+        self.assertTrue(skill_install.is_link(
+            skill_install.consumer_dir(self.home, "claude")))
+        self.assertFalse(os.path.lexists(
+            skill_install.consumer_dir(self.home, "cline")))
+
+    def test_verify_covers_both_consumers(self):
+        skill_install.main([
+            "install", "--target", "all", "--home", self.home,
+            "--source", self.source, "--force"])
+        problems, notes = skill_install.verify_installation(self.source, self.home)
+        self.assertEqual(problems, [])
+        self.assertTrue(any("claude: VERIFIED" in n for n in notes))
+        self.assertTrue(any("cline: VERIFIED" in n for n in notes))
 
 
 class UninstallTest(unittest.TestCase):
+    CONSUMERS = ("claude", "cline")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="fake home ")
         self.home = self.tmp.name
         self.source = make_source(self.tmp.name)
         skill_install.install_canonical(self.source, self.home)
-        skill_install.ensure_claude_link(self.home)
+        for consumer in self.CONSUMERS:
+            skill_install.ensure_consumer_link(self.home, consumer)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_uninstall_claude_keeps_canonical(self):
-        out = skill_install.uninstall(self.home, "claude")
-        self.assertIn("canonical untouched", out)
-        self.assertFalse(os.path.lexists(skill_install.claude_dir(self.home)))
-        self.assertTrue(os.path.isfile(
-            os.path.join(skill_install.canonical_dir(self.home), "SKILL.md")))
+    def test_uninstall_consumer_keeps_canonical_and_sibling(self):
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                sibling = "cline" if consumer == "claude" else "claude"
+                out = skill_install.uninstall(self.home, consumer)
+                self.assertIn("canonical untouched", out)
+                self.assertFalse(os.path.lexists(
+                    skill_install.consumer_dir(self.home, consumer)))
+                self.assertTrue(os.path.isfile(
+                    os.path.join(skill_install.canonical_dir(self.home), "SKILL.md")))
+                self.assertTrue(skill_install.is_link(
+                    skill_install.consumer_dir(self.home, sibling)))
+                # restore for next subTest iteration independence
+                skill_install.ensure_consumer_link(self.home, consumer)
 
     def test_uninstall_canonical_requires_force(self):
         with self.assertRaises(skill_install.InstallError):
@@ -197,12 +327,29 @@ class UninstallTest(unittest.TestCase):
         skill_install.uninstall(self.home, "agents", force=True)
         self.assertFalse(os.path.exists(skill_install.canonical_dir(self.home)))
 
-    def test_uninstall_refuses_physical_claude(self):
+    def test_uninstall_refuses_physical_consumer(self):
         import shutil
-        skill_install.uninstall(self.home, "claude")  # remove link first
-        shutil.copytree(self.source, skill_install.claude_dir(self.home))
-        with self.assertRaises(skill_install.InstallError):
-            skill_install.uninstall(self.home, "claude")
+        for consumer in self.CONSUMERS:
+            with self.subTest(consumer=consumer):
+                link = skill_install.consumer_dir(self.home, consumer)
+                skill_install.uninstall(self.home, consumer)  # remove link first
+                shutil.copytree(self.source, link)
+                with self.assertRaises(skill_install.InstallError):
+                    skill_install.uninstall(self.home, consumer)
+
+    def test_uninstall_all_order_links_first(self):
+        calls = []
+        real_uninstall = skill_install.uninstall
+
+        def spy(home, target, force=False):
+            calls.append(target)
+            return real_uninstall(home, target, force=force)
+
+        import unittest.mock as mock
+        with mock.patch.object(skill_install, "uninstall", side_effect=spy):
+            skill_install.main([
+                "uninstall", "--target", "all", "--home", self.home, "--force"])
+        self.assertEqual(calls, ["claude", "cline", "agents"])
 
 
 class PlatformNeutralRuntimeTest(unittest.TestCase):

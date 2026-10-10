@@ -80,6 +80,7 @@ One canonical installation, everywhere:
 ```text
 ~/.agents/skills/cass-improve-system/   = the real skill
 ~/.claude/skills/cass-improve-system    = compatibility link to the same skill
+~/.cline/skills/cass-improve-system     = compatibility link to the same skill
                                           (directory junction on Windows,
                                            symlink on Linux/macOS)
 ```
@@ -91,11 +92,14 @@ reinstalls stay idempotent.
 **Windows** (PowerShell):
 
 ```powershell
-# Canonical install + Claude compatibility link (default)
-.\scripts\install-skill.ps1 -Target Both
+# Canonical install + Claude and Cline compatibility links (default)
+.\scripts\install-skill.ps1 -Target All
 
 # Canonical install only
 .\scripts\install-skill.ps1 -Target Agents
+
+# Cline compatibility link only (canonical must already exist)
+.\scripts\install-skill.ps1 -Target Cline
 
 # Verify (byte-identical manifest check)
 .\scripts\verify-install.ps1
@@ -104,11 +108,14 @@ reinstalls stay idempotent.
 **Linux / macOS** (POSIX shell, requires `python3`):
 
 ```bash
-# Canonical install + Claude compatibility symlink (default)
-sh scripts/install-skill.sh --target both
+# Canonical install + Claude and Cline compatibility symlinks (default)
+sh scripts/install-skill.sh --target all
 
 # Canonical install only
 sh scripts/install-skill.sh --target agents
+
+# Cline compatibility link only (canonical must already exist)
+sh scripts/install-skill.sh --target cline
 
 # Verify (byte-identical manifest check)
 sh scripts/verify-install.sh
@@ -204,17 +211,29 @@ upstream-supported method documented by the repository
 bash; note Intel Macs build from source).
 
 Install the skill canonically:
-- Windows (PowerShell): .\scripts\install-skill.ps1 -Target Both
-- Linux/macOS (POSIX shell): sh scripts/install-skill.sh --target both
+- Windows (PowerShell): .\scripts\install-skill.ps1 -Target All
+- Linux/macOS (POSIX shell): sh scripts/install-skill.sh --target all
 
-This creates the real skill at ~/.agents/skills/cass-improve-system/ plus a
-compatibility link at ~/.claude/skills/cass-improve-system/ (junction on
-Windows, symlink on Linux/macOS) pointing at it.
+This creates the real skill at ~/.agents/skills/cass-improve-system/ plus
+compatibility links at ~/.claude/skills/cass-improve-system/ and
+~/.cline/skills/cass-improve-system/ (junctions on Windows, symlinks on
+Linux/macOS) pointing at it.
 
 Run the repository's verification steps after installation and report the
 OS, installed CASS version, canonical skill path, link target, and
 validation result.
 ```
+
+## Compatibility
+
+| Agent | Agent Skills support | Integration | E2E |
+|---|---|---|---|
+| OpenCode | verified current support | canonical `.agents` installation | passed (24h + 7d reviews) |
+| Claude Code | verified | compatibility link to canonical | install path verified |
+| Cline | native Agent Skills (no fork/adapter) | compatibility link at `.cline/skills` to canonical | passed on Cline 3.0.68 (13/13 analyzed, 11 WAL-recovered, 0 skipped) |
+
+Cline reads the stock `SKILL.md` through its normal Skill mechanism;
+`~/.agents` remains the single physical tree.
 
 ## License
 

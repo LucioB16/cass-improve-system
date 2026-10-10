@@ -10,7 +10,7 @@ home_dir=""
 force=""
 
 usage() {
-  echo "usage: install-skill.sh [--target agents|both|claude] [--source DIR] [--home DIR] [--force]" >&2
+  echo "usage: install-skill.sh [--target agents|both|claude|cline|all] [--source DIR] [--home DIR] [--force]" >&2
 }
 
 while [ $# -gt 0 ]; do
@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$target" in
-  agents|both|claude) ;;
+  agents|both|claude|cline|all) ;;
   *) echo "invalid --target: $target" >&2; usage; exit 2 ;;
 esac
 

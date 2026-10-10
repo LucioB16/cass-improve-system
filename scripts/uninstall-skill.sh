@@ -1,6 +1,6 @@
 #!/bin/sh
 # Thin launcher: uninstall policy lives in scripts/skill_install.py.
-# Removing the Claude link never touches the canonical directory.
+# Removing a compatibility link never touches the canonical directory.
 # Removing the canonical directory requires --force.
 set -u
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -10,7 +10,7 @@ home_dir=""
 force=""
 
 usage() {
-  echo "usage: uninstall-skill.sh [--target agents|both|claude] [--home DIR] [--force]" >&2
+  echo "usage: uninstall-skill.sh [--target agents|both|claude|cline|all] [--home DIR] [--force]" >&2
 }
 
 while [ $# -gt 0 ]; do
@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$target" in
-  agents|both|claude) ;;
+  agents|both|claude|cline|all) ;;
   *) echo "invalid --target: $target" >&2; usage; exit 2 ;;
 esac
 

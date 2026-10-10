@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("Agents", "Both", "Claude", "Auto")]
-    [string]$Target = "Both",
+    [ValidateSet("Agents", "Both", "Claude", "Cline", "All", "Auto")]
+    [string]$Target = "All",
     [string]$Source = "",
     [string]$HomeDir = "",
     [switch]$Force
@@ -14,7 +14,7 @@ $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
 if (-not $python) { Write-Error "Python 3 is required (python or py on PATH)"; exit 1 }
 
-$map = @{ Agents = "agents"; Both = "both"; Claude = "claude" }
+$map = @{ Agents = "agents"; Both = "both"; Claude = "claude"; Cline = "cline"; All = "all" }
 if ($Target -eq "Auto") {
     if (Get-Command claude -ErrorAction SilentlyContinue) { $Target = "Both" }
     else { $Target = "Agents" }

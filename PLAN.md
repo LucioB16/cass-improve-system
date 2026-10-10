@@ -636,6 +636,11 @@ is a compatibility link (junction on Windows, symlink on Linux/macOS) to it,
 so the two paths can never drift. The full suite plus an isolated-HOME
 install/verify/reinstall/uninstall exercise passes on all three platforms in CI.
 
+Cline is officially supported as a native Agent Skills consumer:
+`~/.cline/skills/cass-improve-system` is a compatibility link (junction on
+Windows, symlink on Linux/macOS) onto the single canonical tree, managed by
+the same installer/verifier/uninstaller with identical safety semantics.
+
 ---
 
 # Phase 17 — Fresh-session hardening (install drift + export recovery)
@@ -659,6 +664,39 @@ Added after the fresh-session test exposed two production defects.
 - [x] Document coverage and degraded recoveries in `docs/testing.md` and
   `docs/cass-integration.md`.
 - [x] Final literal fresh OpenCode-session invocation (reserved for the user).
+
+---
+
+# Phase 19 — Official Cline Agent Skills support
+
+Verified premises: Cline supports Agent Skills natively (`SKILL.md` +
+`name`/`description` frontmatter; global `~/.cline/skills/` on macOS/Linux
+and `C:\Users\USERNAME\.cline\skills\` on Windows; auto-detection —
+https://docs.cline.bot/customization/skills). No Cline fork or adapter.
+Real machine: `C:\Users\lucio\.cline\skills` is a compatibility junction
+onto canonical `.agents\skills` (read-only verified, never modified).
+
+- [x] Generalize the installer to consumers `claude` + `cline`
+  (`scripts/skill_install.py`); targets `agents/claude/cline/both/all`
+  with `both = agents + claude` preserved and `all = agents + claude + cline`.
+- [x] Apply the full link safety model to Cline (missing/correct/broken/
+  wrong/physical-identical-migrate/divergent-refuse/blocking-file) plus
+  `resolved-alias` acceptance for parent-level links (never modify/remove).
+- [x] Canonical `.agents` stays physical; uninstalling a link never touches it.
+- [x] Extend verification to report both consumers; extend uninstall
+  (`cline`, `all` links-first).
+- [x] Update thin `.ps1`/`.sh` launchers for the new targets.
+- [x] Add deterministic Cline tests (parameterized consumer coverage,
+  parent-level alias fixture, `all`/`both` semantics, uninstall safety).
+- [x] Tolerate UTF-16 piped input at pipeline entry points (PowerShell `>`
+  caveat) with regression test.
+- [x] Extend CI install exercise (all → verify → reinstall → selective
+  uninstall → cleanup) on windows/ubuntu/macos.
+- [x] Document: README Cline support + compatibility matrix + agent prompt,
+  architecture install model, testing (Cline 3.0.68 E2E + UTF-8 note),
+  per-OS CASS notes.
+- [x] Validate on this machine read-only (real Cline junction untouched);
+  full suite green; diff audit; commit, push, CI green.
 
 ---
 
