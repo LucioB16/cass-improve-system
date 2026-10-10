@@ -35,7 +35,8 @@ Find things I keep repeating that should become skills or automations.
 
 ## Workflow
 
-`scripts/` below means this skill's `scripts/` directory. All CASS calls go
+`scripts/` below means this skill's `scripts/` directory. Run them with
+`python3` (`python` on Windows). All CASS calls go
 through `cass_adapter.py` (machine-readable flags, `--no-maintenance`).
 Never run bare `cass` — it launches an interactive TUI.
 

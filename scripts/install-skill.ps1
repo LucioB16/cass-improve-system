@@ -1,36 +1,29 @@
 param(
-    [ValidateSet("Agents", "Claude", "Auto")]
-    [string]$Target = "Agents",
+    [ValidateSet("Agents", "Both", "Claude", "Auto")]
+    [string]$Target = "Both",
     [string]$Source = "",
+    [string]$HomeDir = "",
     [switch]$Force
 )
 $ErrorActionPreference = "Stop"
 
-if (-not $Source) {
-    $Source = Join-Path $PSScriptRoot "..\skill\cass-improve-system"
-}
+# Thin launcher: all install policy lives in scripts/skill_install.py so
+# Windows/POSIX behavior cannot diverge.
+$engine = Join-Path $PSScriptRoot "skill_install.py"
+$python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
+if (-not $python) { Write-Error "Python 3 is required (python or py on PATH)"; exit 1 }
 
-function Get-Destination([string]$t) {
-    if ($t -eq "Claude") { return Join-Path $HOME ".claude\skills\cass-improve-system" }
-    return Join-Path $HOME ".agents\skills\cass-improve-system"
-}
-
+$map = @{ Agents = "agents"; Both = "both"; Claude = "claude" }
 if ($Target -eq "Auto") {
-    if (Get-Command claude -ErrorAction SilentlyContinue) { $Target = "Claude" }
+    if (Get-Command claude -ErrorAction SilentlyContinue) { $Target = "Both" }
     else { $Target = "Agents" }
     Write-Host "Auto-detected target: $Target"
 }
 
-$src = Resolve-Path -LiteralPath $Source
-$dest = Get-Destination $Target
-if ((Test-Path $dest) -and -not $Force) {
-    Write-Error "Destination already exists: $dest (re-run with -Force to overwrite)"
-}
-if (Test-Path $dest) {
-    # Remove first so deleted/renamed source files cannot linger as stale extras.
-    Remove-Item -LiteralPath $dest -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $dest | Out-Null
-Copy-Item (Join-Path $src "*") $dest -Recurse -Force -Exclude "__pycache__", "*.pyc", "*.pyo"
-& (Join-Path $PSScriptRoot "verify-install.ps1") -InstalledPath $dest -Source $src
-Write-Host "Installed cass-improve-system ($Target) to $dest"
+$args = @($engine, "install", "--target", $map[$Target])
+if ($Source) { $args += @("--source", $Source) }
+if ($HomeDir) { $args += @("--home", $HomeDir) }
+if ($Force) { $args += "--force" }
+& $python.Source $args
+exit $LASTEXITCODE

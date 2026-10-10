@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: unit tests (no CASS history required)
+        run: python -m unittest discover -s tests -v
+
+  install:
+    name: install exercise (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: install into isolated HOME (POSIX)
+        if: runner.os != 'Windows'
+        run: |
+          export TESTHOME="$RUNNER_TEMP/fake home"
+          sh scripts/install-skill.sh --target both --home "$TESTHOME" --force
+          sh scripts/verify-install.sh --home "$TESTHOME"
+          test -L "$TESTHOME/.claude/skills/cass-improve-system"
+          test "$(readlink "$TESTHOME/.claude/skills/cass-improve-system")" = "$TESTHOME/.agents/skills/cass-improve-system"
+          sh scripts/install-skill.sh --target both --home "$TESTHOME" --force
+          sh scripts/verify-install.sh --home "$TESTHOME"
+          python3 scripts/skill_install.py uninstall --target claude --home "$TESTHOME"
+          test ! -e "$TESTHOME/.claude/skills/cass-improve-system"
+          test -f "$TESTHOME/.agents/skills/cass-improve-system/SKILL.md"
+          python3 scripts/skill_install.py uninstall --target agents --home "$TESTHOME" --force
+          test ! -e "$TESTHOME/.agents/skills/cass-improve-system"
+      - name: install into isolated HOME (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:TESTHOME = "$env:RUNNER_TEMP\fake home"
+          python scripts/skill_install.py install --target both --home $env:TESTHOME --force
+          python scripts/skill_install.py verify --home $env:TESTHOME
+          $link = Get-Item (Join-Path $env:TESTHOME '.claude\skills\cass-improve-system')
+          if ($link.LinkType -ne 'Junction') { throw "expected Junction, got $($link.LinkType)" }
+          if ($link.Target -ne (Join-Path $env:TESTHOME '.agents\skills\cass-improve-system')) { throw "wrong target: $($link.Target)" }
+          python scripts/skill_install.py install --target both --home $env:TESTHOME --force
+          python scripts/skill_install.py verify --home $env:TESTHOME
+          .\scripts\verify-install.ps1 -HomeDir $env:TESTHOME
+          python scripts/skill_install.py uninstall --target claude --home $env:TESTHOME
+          if (Test-Path (Join-Path $env:TESTHOME '.claude\skills\cass-improve-system')) { throw "link not removed" }
+          if (-not (Test-Path (Join-Path $env:TESTHOME '.agents\skills\cass-improve-system\SKILL.md'))) { throw "canonical harmed" }
+          python scripts/skill_install.py uninstall --target agents --home $env:TESTHOME --force
+          if (Test-Path (Join-Path $env:TESTHOME '.agents\skills\cass-improve-system')) { throw "canonical not removed" }

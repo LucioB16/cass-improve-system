@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Narrow adapter over the external CASS CLI.
 
 All CASS-specific syntax lives here. The rest of the skill imports this

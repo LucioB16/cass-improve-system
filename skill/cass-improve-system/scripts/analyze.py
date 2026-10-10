@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Aggregate per-session signals into scored cross-session candidates.
 
 Reads normalized sessions JSON (see normalize_cass.py) from stdin/--input,

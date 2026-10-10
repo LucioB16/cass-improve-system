@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Deterministic recursive manifest of a skill tree: {relpath: sha256}.
 
 Bytecode (`__pycache__/`, `*.pyc`, `*.pyo`) is excluded: it is

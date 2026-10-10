@@ -629,6 +629,13 @@ The project is complete only when all of the following are true:
 
 A fresh coding-agent session can use the globally installed `cass-improve-system` skill to ask for a retrospective over the last 24 hours, 7 days, or an explicit period. The skill uses CASS to ingest/enumerate the relevant local coding-agent history across projects, analyzes the corpus hierarchically, and returns grounded improvement recommendations without requiring the user to run anything inside the original work sessions.
 
+Installation is officially supported on Windows, Linux, and macOS under one
+canonical model: the physical skill lives at
+`~/.agents/skills/cass-improve-system/` and `~/.claude/skills/cass-improve-system`
+is a compatibility link (junction on Windows, symlink on Linux/macOS) to it,
+so the two paths can never drift. The full suite plus an isolated-HOME
+install/verify/reinstall/uninstall exercise passes on all three platforms in CI.
+
 ---
 
 # Phase 17 — Fresh-session hardening (install drift + export recovery)
@@ -652,3 +659,31 @@ Added after the fresh-session test exposed two production defects.
 - [x] Document coverage and degraded recoveries in `docs/testing.md` and
   `docs/cass-integration.md`.
 - [x] Final literal fresh OpenCode-session invocation (reserved for the user).
+
+---
+
+# Phase 18 — Cross-platform installation and canonical skill linking
+
+- [x] Migrate the Windows Claude copy to a directory junction onto the
+  canonical `.agents` installation (verify identity first, verify target,
+  discovery, edit-visibility, and runtime after).
+- [x] Implement shared install core `scripts/skill_install.py` (canonical
+  copy + safe link policy + manifest verification + uninstall safety).
+- [x] Provide thin `install/verify/uninstall-skill.ps1` launchers (Windows).
+- [x] Provide POSIX `install/verify/uninstall-skill.sh` launchers (Linux/macOS).
+- [x] Add `tests/test_install.py` covering canonical install, link states
+  (correct/broken/wrong-target), physical migration vs divergent-fail,
+  idempotency, uninstall safety, spaces in paths.
+- [x] Windows 10/11: full validation (junction, discovery, runtime, verify).
+- [x] Linux: validate install model, symlink, verifier, uninstaller
+  (CI ubuntu-latest with isolated HOME).
+- [x] macOS: validate install model, symlink, verifier, uninstaller
+  (CI macos-latest with isolated HOME); document Intel-Mac CASS caveat.
+- [x] Document per-OS CASS installation from upstream sources
+  (`docs/cass-integration.md`).
+- [x] Update README (per-OS install, canonical model, agent prompt with OS
+  detection) and architecture/testing docs.
+- [ ] Add GitHub Actions matrix (windows/ubuntu/macos): unit tests plus
+  isolated-HOME install/verify/reinstall/uninstall exercise.
+- [x] Run the complete suite; inspect `git diff` for secrets/paths/caches;
+  commit, push, verify remote + clean status.

@@ -28,6 +28,23 @@ scripts/report.py ──→ markdown skeleton → agent verifies against cited
   findings, verifies evidence, drafts proposals. Heuristic signals are leads,
   never verdicts.
 
+## Installation model (canonical + link)
+
+One physical skill tree, installed by the shared `scripts/skill_install.py`
+core (thin `.ps1` / `.sh` launchers only forward arguments, so platforms
+cannot diverge):
+
+```text
+<home>/.agents/skills/cass-improve-system/   canonical (source of truth)
+<home>/.claude/skills/cass-improve-system    compatibility link
+                                             (junction on Windows,
+                                              symlink on Linux/macOS)
+```
+
+Reinstalls are idempotent; verification compares a recursive SHA-256
+manifest (bytecode excluded) and additionally classifies the Claude path
+(correct / broken / wrong-target / physical), failing safely on drift.
+
 ## Key decisions
 
 - CASS is an external executable dependency, never vendored.

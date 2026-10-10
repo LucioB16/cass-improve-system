@@ -1,11 +1,22 @@
 param(
-    [string]$InstalledPath = ""
+    [ValidateSet("Agents", "Both", "Claude")]
+    [string]$Target = "Claude",
+    [string]$HomeDir = "",
+    [switch]$Force
 )
 $ErrorActionPreference = "Stop"
-if (-not $InstalledPath) { $InstalledPath = Join-Path $HOME ".agents\skills\cass-improve-system" }
-if (-not (Test-Path -LiteralPath $InstalledPath)) {
-    Write-Host "Nothing to remove: $InstalledPath does not exist."
-    exit 0
-}
-Remove-Item -LiteralPath $InstalledPath -Recurse -Force
-Write-Host "Removed $InstalledPath"
+
+# Thin launcher: uninstall policy lives in scripts/skill_install.py.
+# Removing the Claude link never touches the canonical directory.
+# Removing the canonical directory requires -Force.
+$engine = Join-Path $PSScriptRoot "skill_install.py"
+$python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
+if (-not $python) { Write-Error "Python 3 is required (python or py on PATH)"; exit 1 }
+
+$map = @{ Agents = "agents"; Both = "both"; Claude = "claude" }
+$args = @($engine, "uninstall", "--target", $map[$Target])
+if ($HomeDir) { $args += @("--home", $HomeDir) }
+if ($Force) { $args += "--force" }
+& $python.Source $args
+exit $LASTEXITCODE

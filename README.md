@@ -65,18 +65,73 @@ curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/coding_agent_sess
 Then build the index once: `cass index --full`. Minimum supported version: 0.8.0
 (robot-mode contract); verified with 0.10.0. See `docs/cass-integration.md`.
 
+Platform notes (verified against upstream installer source):
+- **Linux**: prebuilt `linux-amd64`/`linux-arm64` binaries, glibc ≥ 2.28;
+  installs to `~/.local/bin` (add to `PATH`, e.g. via `~/.bashrc`).
+- **macOS**: prebuilt `darwin-arm64` (Apple Silicon). **Intel Macs**: no
+  prebuilt binary is published — the installer falls back to building from
+  source (requires git and the Rust toolchain).
+- Requires `curl` + `bash` for the one-liner; `python3` for this skill's scripts.
+
 ## Install the skill
 
+One canonical installation, everywhere:
+
+```text
+~/.agents/skills/cass-improve-system/   = the real skill
+~/.claude/skills/cass-improve-system    = compatibility link to the same skill
+                                          (directory junction on Windows,
+                                           symlink on Linux/macOS)
+```
+
+A single physical copy means the two paths can never drift apart — an edit
+to the canonical tree is instantly visible through the Claude path, and
+reinstalls stay idempotent.
+
+**Windows** (PowerShell):
+
 ```powershell
-# Generic multi-agent path (default)
+# Canonical install + Claude compatibility link (default)
+.\scripts\install-skill.ps1 -Target Both
+
+# Canonical install only
 .\scripts\install-skill.ps1 -Target Agents
 
-# Claude Code
-.\scripts\install-skill.ps1 -Target Claude
-
-# Verify
+# Verify (byte-identical manifest check)
 .\scripts\verify-install.ps1
 ```
+
+**Linux / macOS** (POSIX shell, requires `python3`):
+
+```bash
+# Canonical install + Claude compatibility symlink (default)
+sh scripts/install-skill.sh --target both
+
+# Canonical install only
+sh scripts/install-skill.sh --target agents
+
+# Verify (byte-identical manifest check)
+sh scripts/verify-install.sh
+```
+
+Uninstall (the Claude link is removed without touching the canonical copy;
+removing the canonical copy requires `--force` / `-Force`):
+
+```bash
+# Linux/macOS
+sh scripts/uninstall-skill.sh --target claude
+sh scripts/uninstall-skill.sh --target agents --force
+```
+
+```powershell
+# Windows
+.\scripts\uninstall-skill.ps1 -Target Claude
+.\scripts\uninstall-skill.ps1 -Target Agents -Force
+```
+
+Supported and CI-tested on Windows, Linux, and macOS. The skill's Python
+runtime is stdlib-only and platform-neutral (UTF-8 enforced for all
+piped JSON); CASS itself is resolved through `PATH` on every platform.
 
 ## Usage
 
@@ -117,9 +172,12 @@ limitations.
 
 ```text
 skill/cass-improve-system/  SKILL.md, scripts/, references/
-scripts/                    install-skill.ps1, verify-install.ps1, uninstall-skill.ps1
+scripts/                    skill_install.py (shared logic),
+                            install/verify/uninstall-skill.ps1 (Windows),
+                            install/verify/uninstall-skill.sh (Linux/macOS)
 tests/                      deterministic unittest suite + fixtures
 docs/                       architecture.md, cass-integration.md, testing.md
+.github/workflows/          CI matrix: windows/ubuntu/macos
 ```
 
 ## Development / testing
@@ -129,7 +187,9 @@ python -m unittest discover -s tests -v
 ```
 
 Stdlib only — no third-party Python dependencies. Live CASS history is used
-for integration validation only, never as a test dependency.
+for integration validation only, never as a test dependency. CI runs the
+suite plus an isolated-HOME install/verify/reinstall/uninstall exercise on
+Windows, Ubuntu, and macOS.
 
 ## Agent install prompt
 
@@ -137,12 +197,23 @@ for integration validation only, never as a test dependency.
 Install the cass-improve-system skill from:
 https://github.com/LucioB16/cass-improve-system
 
-First verify that CASS is installed and working. If it is missing, install it using the upstream-supported method documented by the repository.
+First detect the operating system. Then verify that CASS is installed and
+working (cass --version). If it is missing, install it using the
+upstream-supported method documented by the repository
+(Windows: install.ps1 one-liner; Linux/macOS: install.sh one-liner with
+bash; note Intel Macs build from source).
 
-If you are Claude Code, install the skill globally under ~/.claude/skills/cass-improve-system/.
-Otherwise, prefer the shared global path ~/.agents/skills/cass-improve-system/.
+Install the skill canonically:
+- Windows (PowerShell): .\scripts\install-skill.ps1 -Target Both
+- Linux/macOS (POSIX shell): sh scripts/install-skill.sh --target both
 
-Run the repository's verification steps after installation and report the installed CASS version, skill path, and validation result.
+This creates the real skill at ~/.agents/skills/cass-improve-system/ plus a
+compatibility link at ~/.claude/skills/cass-improve-system/ (junction on
+Windows, symlink on Linux/macOS) pointing at it.
+
+Run the repository's verification steps after installation and report the
+OS, installed CASS version, canonical skill path, link target, and
+validation result.
 ```
 
 ## License

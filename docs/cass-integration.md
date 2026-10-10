@@ -4,15 +4,33 @@ Verified against **cass 0.10.0** (installed 2026-10-06 via the official
 Windows installer). Upstream:
 `https://github.com/Dicklesworthstone/coding_agent_session_search`
 
-## Installation (Windows, verified)
+## Installation per OS (from upstream installer sources)
+
+Windows (PowerShell, verified 2026-10-06):
 
 ```powershell
 irm https://raw.githubusercontent.com/Dicklesworthstone/coding_agent_session_search/main/install.ps1 | iex
 ```
 
-Installs `cass.exe` to `~/.local/bin` (release asset `cass-windows-amd64.zip`,
-SHA256-verified by the installer). Add that directory to the user `PATH` so
-future shells and coding-agent processes can find it.
+Installs SHA256-verified `cass.exe` to `~/.local/bin` (release asset
+`cass-windows-amd64.zip`). Add that directory to the user `PATH`.
+
+Linux / macOS (bash + curl, per upstream `install.sh`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/coding_agent_session_search/main/install.sh \
+  | bash -s -- --easy-mode --verify
+```
+
+- Linux: prebuilt `linux-amd64`/`linux-arm64` tarballs, glibc ≥ 2.28;
+  installs to `~/.local/bin` (easy-mode appends it to `~/.bashrc`/`~/.zshrc`).
+- macOS Apple Silicon: prebuilt `darwin-arm64`.
+- macOS Intel: **no prebuilt binary is published** — the installer falls
+  back to building from source (requires git and the Rust toolchain).
+
+Then build the index once: `cass index --full`. The skill resolves `cass`
+through `PATH` on every platform; no platform-specific CASS behavior is
+assumed beyond these upstream installation paths.
 
 Validation after install:
 

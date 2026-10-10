@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """CASS preflight: graded readiness with actionable guidance.
 
 Exit codes:

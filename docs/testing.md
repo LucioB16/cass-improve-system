@@ -23,7 +23,14 @@ actionable), malformed input, export-failure accounting, secret redaction
 (tokens, passwords, private keys), signal extraction, cross-session
 aggregation, cross-project vs project-scoped destinations, de-duplication,
 occurrence accounting, honest empty reports, evidence traceability,
-read-only pipeline (no files written).
+read-only pipeline (no files written), canonical install/link/uninstall
+policy (correct/broken/wrong-target links, identical-vs-divergent physical
+trees, idempotency, uninstall safety, spaces in paths), manifest
+determinism.
+
+CI (`.github/workflows/ci.yml`, matrix windows/ubuntu/macos) runs the unit
+suite plus an isolated-HOME install → verify → reinstall → uninstall
+exercise using the real wrappers; no private CASS history required.
 
 ## End-to-end validation (live CASS 0.10.0, 2026-10-10)
 

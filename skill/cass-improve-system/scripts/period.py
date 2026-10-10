@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Period expressions for reviews.
 
 Supported inputs (case-insensitive, all mapped to CASS --since/--until syntax):

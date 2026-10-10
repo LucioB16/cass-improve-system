@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Render findings JSON as a human-readable markdown review report.
 
 Reads findings JSON (see analyze.py) from stdin/--input and writes markdown

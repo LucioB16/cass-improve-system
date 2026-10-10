@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Enumerate the review corpus for a period via CASS (read-only).
 
 Usage:

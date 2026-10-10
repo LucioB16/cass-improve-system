@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Normalize CASS session exports into a vendor-independent schema.
 
 Reads an inventory JSON (see collect_sessions.py) from stdin or --input,
