@@ -116,11 +116,19 @@ def create_link(link: str, canonical: str) -> None:
 
 
 def remove_link_only(link: str) -> None:
-    """Remove a link itself. Never touches the target (safe for junctions:
-    os.rmdir on a junction removes the link, not the target)."""
-    if not is_link(link):
-        raise InstallError(f"refusing to remove non-link: {link}")
-    os.rmdir(link)
+    """Remove a link itself, never its target.
+
+    os.unlink removes symlinks on every platform; os.rmdir removes Windows
+    junctions (os.rmdir on a POSIX symlink-to-directory raises
+    NotADirectoryError, so it must not be used there).
+    """
+    if os.path.islink(link):
+        os.unlink(link)
+        return
+    if _is_windows_junction(link):
+        os.rmdir(link)
+        return
+    raise InstallError(f"refusing to remove non-link: {link}")
 
 
 def classify_claude_path(link: str, canonical: str) -> tuple[str, str]:
