@@ -683,7 +683,7 @@ Added after the fresh-session test exposed two production defects.
   (`docs/cass-integration.md`).
 - [x] Update README (per-OS install, canonical model, agent prompt with OS
   detection) and architecture/testing docs.
-- [ ] Add GitHub Actions matrix (windows/ubuntu/macos): unit tests plus
+- [x] Add GitHub Actions matrix (windows/ubuntu/macos): unit tests plus
   isolated-HOME install/verify/reinstall/uninstall exercise.
 - [x] Run the complete suite; inspect `git diff` for secrets/paths/caches;
   commit, push, verify remote + clean status.
