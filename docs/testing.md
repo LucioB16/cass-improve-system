@@ -42,6 +42,31 @@ read-only pipeline (no files written).
   and fails closed on any mismatch. Both global copies verified
   byte-identical file-by-file after reinstall.
 
+## Final fresh-session acceptance (PASSED, literal fresh OpenCode session)
+
+- OpenCode resolved the global skill from:
+  `C:\Users\lucio\.claude\skills\cass-improve-system`
+- No development repository was inspected or used.
+- Only stock installed skill scripts were executed.
+- CASS 0.10.0 was healthy.
+- Full workflow completed: Preflight → Inventory → Normalize → Aggregate → Report.
+- 13 sessions discovered; 13 analyzed; **11 recovered** through the
+  built-in degraded CASS export/WAL recovery path; 0 skipped.
+- 2 agents represented: antigravity and opencode. 6 workspaces represented.
+- 0 high-confidence recommendations. 3 medium/watch candidates, all
+  correctly rejected after evidence verification. 231 single-occurrence
+  signals correctly remained do-not-promote.
+- No durable project, AGENTS.md, skill, repository, or learned-knowledge
+  files were modified.
+- The globally installed production skill **passed the final fresh-session
+  acceptance test end-to-end**.
+
+Note: OpenCode selected the `~/.claude` copy because duplicate skill names
+across `~/.claude` and `~/.agents` are not guaranteed to resolve in a
+deterministic order; standalone `~/.agents` discovery had already been
+proven separately, and both installed copies were previously verified
+byte-identical.
+
 ## Earlier validation history (superseded where noted)
 
 - Preflight: exit 0. Stale-only state observed live (`healthy:false`,

@@ -492,7 +492,7 @@ Use the real globally installed CASS.
 - [x] Confirm the skill does not modify project files during the default review.
 - [x] Run a 7-day review if the corpus size is reasonable.
 - [x] Validate context-budget behavior on the larger corpus.
-- [ ] If the installed coding-agent tooling allows invoking the installed skill directly, perform an actual invocation from a fresh session/context and validate the UX.
+- [x] If the installed coding-agent tooling allows invoking the installed skill directly, perform an actual invocation from a fresh session/context and validate the UX.
 - [x] Record end-to-end validation notes in `docs/testing.md`.
 - [x] Fix defects found during the real review and rerun relevant tests.
 
@@ -651,4 +651,4 @@ Added after the fresh-session test exposed two production defects.
 - [x] Live-validate: 24h pipeline completes (honest empty when no sessions).
 - [x] Document coverage and degraded recoveries in `docs/testing.md` and
   `docs/cass-integration.md`.
-- [ ] Final literal fresh OpenCode-session invocation (reserved for the user).
+- [x] Final literal fresh OpenCode-session invocation (reserved for the user).
