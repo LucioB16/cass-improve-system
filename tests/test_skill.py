@@ -186,18 +186,22 @@ class AdapterSafetyTest(unittest.TestCase):
         self.assertIn("--robot", seen["argv"])
 
     def test_export_omits_robot_flag(self):
-        # `cass export` rejects --robot; --format json is its machine mode.
+        # `cass export` rejects --robot; --format json -o <file> is its machine mode.
         seen = {}
 
         def fake_run(argv, timeout_s=120):
             seen["argv"] = argv
-            return mock.Mock(returncode=0, stdout='[{"role": "user"}]', stderr="")
+            out = argv[argv.index("-o") + 1]
+            with open(out, "w", encoding="utf-8") as fh:
+                fh.write('[{"role": "user"}]')
+            return mock.Mock(returncode=0, stdout="", stderr="")
 
         with mock.patch.object(cass_adapter, "_run_raw", side_effect=fake_run):
-            out = cass_adapter.export_session("some/path", "local")
-        self.assertEqual(out, [{"role": "user"}])
+            messages, recovered = cass_adapter.export_session("some/path", "local")
+        self.assertEqual(messages, [{"role": "user"}])
+        self.assertFalse(recovered)
         self.assertNotIn("--robot", seen["argv"])
-        self.assertIn("--format", seen["argv"])
+        self.assertIn("-o", seen["argv"])
 
     def test_non_cass_command_refused(self):
         with self.assertRaises(cass_adapter.CassError):
@@ -209,6 +213,103 @@ class AdapterSafetyTest(unittest.TestCase):
             with self.assertRaises(cass_adapter.CassError) as ctx:
                 cass_adapter.run_cass_json(["search", "x"])
         self.assertTrue(ctx.exception.actionable)
+
+
+class ExportRecoveryTest(unittest.TestCase):
+    """Deterministic replays of the CASS 0.10.0 WAL/panic export behavior."""
+
+    def _fake(self, script):
+        """script: list of (returncode, file_content|None|'nofile') per call."""
+        calls = []
+
+        def fake_run(argv, timeout_s=120):
+            calls.append(list(argv))
+            code, content = script[min(len(calls) - 1, len(script) - 1)]
+            if content != "nofile":
+                with open(argv[argv.index("-o") + 1], "w", encoding="utf-8") as fh:
+                    fh.write(content if content is not None else "")
+            # no sleep in tests
+            return mock.Mock(returncode=code, stdout="", stderr="panic" if code else "")
+
+        return fake_run, calls
+
+    def test_nonzero_exit_with_valid_file_recovers(self):
+        fake, _ = self._fake([(3221226505, '[{"role": "user", "content": "hi"}]')])
+        with mock.patch.object(cass_adapter, "_run_raw", side_effect=fake), \
+             mock.patch.object(cass_adapter.time, "sleep", return_value=None):
+            messages, recovered = cass_adapter.export_session("p", "local", retries=1)
+        self.assertEqual(messages, [{"role": "user", "content": "hi"}])
+        self.assertTrue(recovered)
+
+    def test_nonzero_exit_with_malformed_file_fails_honestly(self):
+        fake, _ = self._fake([(3221226505, '[{"role": "user", ')])
+        with mock.patch.object(cass_adapter, "_run_raw", side_effect=fake), \
+             mock.patch.object(cass_adapter.time, "sleep", return_value=None):
+            with self.assertRaises(cass_adapter.CassError):
+                cass_adapter.export_session("p", "local", retries=1)
+
+    def test_nonzero_exit_with_error_envelope_fails(self):
+        fake, _ = self._fake([(2, '{"error": {"message": "usage"}}')])
+        with mock.patch.object(cass_adapter, "_run_raw", side_effect=fake), \
+             mock.patch.object(cass_adapter.time, "sleep", return_value=None):
+            with self.assertRaises(cass_adapter.CassError):
+                cass_adapter.export_session("p", "local", retries=1)
+
+    def test_include_tools_failure_falls_back_to_plain(self):
+        fake, calls = self._fake([
+            (3221226505, "nofile"),   # --include-tools attempt: panic, no file
+            (0, '[{"role": "assistant"}]'),  # plain attempt: clean success
+        ])
+        with mock.patch.object(cass_adapter, "_run_raw", side_effect=fake), \
+             mock.patch.object(cass_adapter.time, "sleep", return_value=None):
+            messages, recovered = cass_adapter.export_session("p", "local", retries=1)
+        self.assertEqual(messages, [{"role": "assistant"}])
+        self.assertFalse(recovered)
+        self.assertIn("--include-tools", calls[0])
+        self.assertNotIn("--include-tools", calls[1])
+
+    def test_repeated_failure_is_bounded_then_gap(self):
+        fake, calls = self._fake([(3221226505, "nofile")])
+        with mock.patch.object(cass_adapter, "_run_raw", side_effect=fake), \
+             mock.patch.object(cass_adapter.time, "sleep", return_value=None):
+            with self.assertRaises(cass_adapter.CassError):
+                cass_adapter.export_session("p", "local", retries=2)
+        self.assertEqual(len(calls), 4)  # 2 rounds x 2 variants: bounded
+
+    def test_zero_exit_with_unusable_file_fails(self):
+        fake, _ = self._fake([(0, "")])
+        with mock.patch.object(cass_adapter, "_run_raw", side_effect=fake), \
+             mock.patch.object(cass_adapter.time, "sleep", return_value=None):
+            with self.assertRaises(cass_adapter.CassError):
+                cass_adapter.export_session("p", "local", retries=1)
+
+
+class ManifestTest(unittest.TestCase):
+    def test_manifest_stable_and_sorted(self):
+        import tempfile
+        import manifest as manifest_mod
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "sub"))
+            with open(os.path.join(tmp, "b.txt"), "w") as fh:
+                fh.write("b")
+            with open(os.path.join(tmp, "sub", "a.txt"), "w") as fh:
+                fh.write("a")
+            first = manifest_mod.manifest(tmp)
+            self.assertEqual(sorted(first), ["b.txt", "sub/a.txt"])
+            self.assertEqual(first, manifest_mod.manifest(tmp))
+
+    def test_manifest_excludes_bytecode(self):
+        import tempfile
+        import manifest as manifest_mod
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "__pycache__"))
+            with open(os.path.join(tmp, "__pycache__", "x.pyc"), "w") as fh:
+                fh.write("x")
+            with open(os.path.join(tmp, "y.pyc"), "w") as fh:
+                fh.write("y")
+            with open(os.path.join(tmp, "ok.py"), "w") as fh:
+                fh.write("ok")
+            self.assertEqual(sorted(manifest_mod.manifest(tmp)), ["ok.py"])
 
 
 class NormalizeTest(unittest.TestCase):
@@ -225,6 +326,16 @@ class NormalizeTest(unittest.TestCase):
             out = normalize_cass.normalize_inventory(inv)
         self.assertEqual(out["coverage"]["sessions_skipped"], 1)
         self.assertEqual(out["coverage"]["sessions_analyzed"], 0)
+
+    def test_recovered_export_flagged_in_metadata_and_coverage(self):
+        inv = {"period": {}, "sessions": [{"path": "p", "agent": "a", "workspace": "w"}],
+               "coverage": {}}
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=([{"role": "user", "content": "hi"}], True)):
+            out = normalize_cass.normalize_inventory(inv)
+        self.assertEqual(out["coverage"]["sessions_analyzed"], 1)
+        self.assertEqual(out["coverage"]["sessions_recovered"], 1)
+        self.assertTrue(out["sessions"][0]["metadata"]["recovered_from_panic"])
 
     def test_secrets_redacted(self):
         text = "key is ghp_abcdefghij1234567890 and password: hunter2 s3cret done"

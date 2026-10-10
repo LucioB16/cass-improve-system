@@ -628,3 +628,27 @@ The project is complete only when all of the following are true:
 ## Definition of Done
 
 A fresh coding-agent session can use the globally installed `cass-improve-system` skill to ask for a retrospective over the last 24 hours, 7 days, or an explicit period. The skill uses CASS to ingest/enumerate the relevant local coding-agent history across projects, analyzes the corpus hierarchically, and returns grounded improvement recommendations without requiring the user to run anything inside the original work sessions.
+
+---
+
+# Phase 17 — Fresh-session hardening (install drift + export recovery)
+
+Added after the fresh-session test exposed two production defects.
+
+- [x] Manifest-compare both installed skill trees against `skill/cass-improve-system/`; diagnose drift.
+- [x] Reinstall both global copies with the repository installer (`-Force`).
+- [x] Verify every installed file byte-identical (recursive SHA-256 manifest).
+- [x] Harden `verify-install.ps1` to fail on STALE/EXTRA files, not just presence.
+- [x] Installer wipes destination first and excludes bytecode (`__pycache__`, `*.pyc`).
+- [x] Add `scripts/manifest.py` with deterministic regression tests.
+- [x] Implement `-o` temp-file export recovery in `cass_adapter.py` (unique temp
+  file, read-only w.r.t. user data, bounded retries, include-tools→plain
+  fallback, validate-before-accept, cleanup, recovery flag, never hide real failures).
+- [x] Add regression tests for all five export scenarios (recover / malformed /
+  fallback / bounded-gap / clean success).
+- [x] Live-validate: stock installed skill processes the failing corpus
+  (7d run: 13/13 analyzed, 11 recovered, 0 skipped).
+- [x] Live-validate: 24h pipeline completes (honest empty when no sessions).
+- [x] Document coverage and degraded recoveries in `docs/testing.md` and
+  `docs/cass-integration.md`.
+- [ ] Final literal fresh OpenCode-session invocation (reserved for the user).

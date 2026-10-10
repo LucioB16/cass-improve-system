@@ -124,10 +124,13 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
         "tool_calls": [],
         "tool_results": [],
         "signals": [],
-        "metadata": {"truncated": False, "export_failed": False},
+        "metadata": {"truncated": False, "export_failed": False,
+                     "recovered_from_panic": False},
     }
     try:
-        raw = export_session(session_id, entry.get("source_id", "local"), timeout_s=timeout_s)
+        raw, recovered = export_session(
+            session_id, entry.get("source_id", "local"), timeout_s=timeout_s)
+        session["metadata"]["recovered_from_panic"] = recovered
     except CassError:
         session["metadata"]["export_failed"] = True
         return session
@@ -154,6 +157,7 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
     sessions = [normalize_one(e, timeout_s) for e in inventory.get("sessions", [])]
     ok = [s for s in sessions if not s["metadata"]["export_failed"]]
     failed = len(sessions) - len(ok)
+    recovered = sum(1 for s in ok if s["metadata"].get("recovered_from_panic"))
     return {
         "period": inventory.get("period", {}),
         "sessions": sessions,
@@ -162,6 +166,7 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
             "sessions_discovered": len(sessions),
             "sessions_analyzed": len(ok),
             "sessions_skipped": failed,
+            "sessions_recovered": recovered,
         },
     }
 

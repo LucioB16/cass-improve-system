@@ -26,7 +26,11 @@ $dest = Get-Destination $Target
 if ((Test-Path $dest) -and -not $Force) {
     Write-Error "Destination already exists: $dest (re-run with -Force to overwrite)"
 }
+if (Test-Path $dest) {
+    # Remove first so deleted/renamed source files cannot linger as stale extras.
+    Remove-Item -LiteralPath $dest -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-Copy-Item (Join-Path $src "*") $dest -Recurse -Force
-& (Join-Path $PSScriptRoot "verify-install.ps1") -InstalledPath $dest
+Copy-Item (Join-Path $src "*") $dest -Recurse -Force -Exclude "__pycache__", "*.pyc", "*.pyo"
+& (Join-Path $PSScriptRoot "verify-install.ps1") -InstalledPath $dest -Source $src
 Write-Host "Installed cass-improve-system ($Target) to $dest"

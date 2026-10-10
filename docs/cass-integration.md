@@ -76,8 +76,15 @@ is isolated in `skill/cass-improve-system/scripts/cass_adapter.py`.
   sessions. The adapter falls back to plain `--format json` automatically.
 - Exporting sessions from a **live-mutating session DB** (e.g. opencode's
   SQLite WAL while that agent is actively working) can crash spuriously with
-  `WAL frame salt mismatch` followed by a thread panic. The adapter retries
-  (3 rounds); persistent failures are reported as coverage gaps, never
-  silently dropped. Prefer running wide reviews when the owning agent is idle.
+  `WAL frame salt mismatch` followed by a thread panic
+  (exit 3221226505) — on plain exports too, not just `--include-tools`.
+  Verified live: `cass export … -o <tmpfile>` still leaves a **complete,
+  parseable JSON file** behind despite the trailing panic. The adapter
+  therefore exports to a unique temp file, ignores stdout, and on nonzero
+  exit validates the file (must parse to a message list; missing, empty,
+  malformed, or error-envelope output is rejected and retried, then
+  reported as an honest coverage gap). Salvaged output is flagged
+  (`recovered_from_panic`) and counted in the report's Coverage
+  limitations. Temp files are always cleaned up.
 - `cass sessions` has `--since` but no `--until` on this version; the skill
   filters the end of the range client-side.

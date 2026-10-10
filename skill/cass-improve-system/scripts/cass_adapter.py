@@ -12,8 +12,10 @@ Safety rules enforced here:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 import time
 
 CASS_UPSTREAM = "https://github.com/Dicklesworthstone/coding_agent_session_search"
@@ -206,42 +208,98 @@ def timeline(
     return result
 
 
+def _read_export_file(path: str) -> list[dict] | None:
+    """Validate a `-o` export file. Returns messages, or None when the file
+    is missing, empty, malformed, an error envelope, or the wrong shape.
+
+    A torn write cannot yield fully parseable JSON, so a file that parses
+    to a message list is accepted even when CASS exited nonzero afterwards.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    if not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if isinstance(data, dict):
+        if "error" in data:
+            return None
+        for key in ("messages", "conversation", "items"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+        else:
+            return None
+    if not isinstance(data, list):
+        return None
+    return data
+
+
 def export_session(
     source_path: str,
     source_id: str = "local",
     timeout_s: int = 120,
     retries: int = 3,
-) -> list[dict]:
-    # `export` rejects --robot/--json; --format json IS its machine-readable
-    # mode. --include-tools surfaces tool calls, but cass <=0.10.0 can panic
-    # on some DB-backed sessions with that flag (upstream bug), so fall back
-    # to a plain export instead of failing the session. Reads against a
-    # live-mutating session DB can also crash spuriously (WAL race), so retry
-    # a few times before giving up and reporting a coverage gap.
+) -> tuple[list[dict], bool]:
+    """Export one session, tolerating the upstream WAL/panic race.
+
+    Returns (messages, recovered). `recovered=True` means the payload was
+    salvaged from a `-o` file left behind by a nonzero-exit export; the
+    caller must surface that as a coverage note.
+
+    Strategy (all inside this adapter):
+    - `export` rejects --robot/--json; `--format json -o <tmpfile>` IS its
+      machine-readable mode. Nothing is parsed from stdout.
+    - Unique temp file per attempt (system temp dir; read-only w.r.t. all
+      user/session data), always cleaned up.
+    - Try `--include-tools` first, fall back to plain export.
+    - On nonzero exit, still validate the `-o` file: CASS 0.10.0 can write
+      a complete export and panic afterwards (WAL frame salt mismatch).
+    - Missing/malformed/empty/error-envelope output is rejected, never
+      mistaken for success; after bounded retries the session raises
+      CassError so it becomes an honest coverage gap.
+    """
+    variants = (
+        ["--include-tools"],
+        [],
+    )
     last_error: CassError | None = None
     for _ in range(max(1, retries)):
-        for argv in (
-            ["export", source_path, "--source", source_id, "--format", "json", "--include-tools"],
-            ["export", source_path, "--source", source_id, "--format", "json"],
-        ):
+        for extra in variants:
+            fd, tmp = tempfile.mkstemp(prefix="cass-export-", suffix=".json")
+            os.close(fd)
             try:
-                result = run_cass_json(argv, timeout_s=timeout_s, machine_flag=None)
-                break
-            except CassError as exc:
-                last_error = exc
-        else:
-            time.sleep(2)
-            continue
-        break
-    else:
-        raise last_error or CassError(f"export failed for {source_path}")
-    if isinstance(result, list):
-        return result
-    if isinstance(result, dict):
-        for key in ("messages", "conversation", "items"):
-            if isinstance(result.get(key), list):
-                return result[key]
-    return []
+                try:
+                    proc = _run_raw(
+                        ["cass", "export", source_path, "--source", source_id,
+                         "--format", "json", *extra, "-o", tmp],
+                        timeout_s,
+                    )
+                except CassError as exc:
+                    last_error = exc
+                    continue
+                messages = _read_export_file(tmp)
+                if messages is not None:
+                    return messages, proc.returncode != 0
+                if proc.returncode == 0:
+                    last_error = CassError(
+                        f"cass export wrote unusable output for {source_path}.")
+                else:
+                    last_error = CassError(
+                        f"cass export {source_path} failed (exit "
+                        f"{proc.returncode}) with no recoverable output.")
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+        time.sleep(2)
+    raise last_error or CassError(f"export failed for {source_path}")
 
 
 def health() -> dict:

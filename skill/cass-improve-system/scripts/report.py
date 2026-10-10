@@ -133,6 +133,11 @@ def render(findings: dict) -> str:
     lines.append("")
     lines.append(f"- skipped/failed sessions: {coverage.get('sessions_skipped', 0)} "
                  "(exports that CASS could not provide; see normalization metadata).")
+    recovered = coverage.get("sessions_recovered", 0)
+    if recovered:
+        lines.append(f"- sessions recovered from nonzero-exit CASS exports: {recovered} "
+                     "(complete `-o` output salvaged after an upstream WAL/panic; "
+                     "validated as parseable JSON before acceptance).")
     lines.append("- heuristic signal extraction is approximate: every candidate "
                  "must be verified against its cited sessions before promotion.")
     lines.append("- report-only by default: no durable files were changed to produce this report.")

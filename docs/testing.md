@@ -14,7 +14,10 @@ Covered: period parsing (24h / N days / explicit ranges / rejects),
 preflight exit codes (missing / old / uninitialized / healthy /
 stale-refresh / stale-strict / broken), readiness classification
 (healthy / stale-only / stale-plus-error-is-broken / uninitialized),
-incremental-only refresh (never `--full`), adapter safety (`--robot`
+incremental-only refresh (never `--full`), export recovery (nonzero-exit
+with valid `-o` file recovers; malformed/error-envelope/empty rejected;
+include-tools→plain fallback; bounded retries then honest gap),
+manifest determinism + bytecode exclusion, adapter safety (`--robot`
 always appended except `export`, non-cass refused, malformed JSON
 actionable), malformed input, export-failure accounting, secret redaction
 (tokens, passwords, private keys), signal extraction, cross-session
@@ -22,23 +25,35 @@ aggregation, cross-project vs project-scoped destinations, de-duplication,
 occurrence accounting, honest empty reports, evidence traceability,
 read-only pipeline (no files written).
 
-## End-to-end validation (live CASS 0.10.0, 2026-10-06/07)
+## End-to-end validation (live CASS 0.10.0, 2026-10-10)
+
+- 7d review via the installed `~/.agents` copy (stock skill, no custom
+  normalizer): 13 discovered → **13 analyzed, 0 skipped**, 2 agents
+  (opencode, antigravity), 6 workspaces. **11 sessions were recovered**
+  from nonzero-exit CASS exports (exit 3221226505 WAL panic) via complete
+  parseable `-o` files; the recovery count is reported under Coverage
+  limitations. 3 medium-confidence candidates + 231 singles →
+  do-not-promote. Full Inventory → Normalize → Aggregate → Report, exit 0.
+- 24h review: 0 sessions in window (no coding activity) → honest empty
+  report, exit 0.
+- Install verification is now hash-based: `verify-install.ps1 -Source`
+  compares a recursive SHA-256 manifest (bytecode excluded) and reports
+  MISS/STALE/EXTRA per file; the installer wipes the destination first
+  and fails closed on any mismatch. Both global copies verified
+  byte-identical file-by-file after reinstall.
+
+## Earlier validation history (superseded where noted)
 
 - Preflight: exit 0. Stale-only state observed live (`healthy:false`,
   `errors:["index stale"]`, age 2608s > 1800s threshold) → one bounded
   incremental `cass index` (+5 conversations in 23s) → healthy. The
   graded policy (healthy / stale→refresh→proceed / uninitialized→4 /
   broken→4, never auto `--full`) is covered by regression tests.
-- 24h review via the installed `~/.agents` copy: 11 sessions discovered
-  (opencode, 5 workspaces), full Inventory → Normalize → Aggregate →
-  Report chain, exit 0. All 11 exports skipped: every session in the
-  window shares the live opencode SQLite WAL that the reviewing session
-  itself was writing — CASS panics on torn WAL reads (upstream bug,
-  documented in `cass-integration.md`). Reported as coverage gaps.
-- 7d review (40-session slice): 18 analyzed across codex / opencode /
-  antigravity, 10 single-occurrence signals → do-not-promote, 0 spurious
-  candidates. No strong clusters in this slice; mechanism verified by
-  fixtures instead.
+- 0/11 incident (resolved): a 24h review once analyzed 0/11 because every
+  session shared the live opencode WAL and CASS panicked after writing
+  complete stdout exports. Fixed by the `-o` temp-file recovery path in
+  `cass_adapter.py` (see `cass-integration.md`); the 2026-10-10 7d run
+  above proves 13/13 with 11 recoveries through the stock skill.
 - Read-only proof: SHA-256 over repo + both global skill copies identical
   before/after the reviews. Reports returned in-conversation; nothing
   written to projects, skills, or instruction files.
