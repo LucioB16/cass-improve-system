@@ -383,13 +383,39 @@ def _text_from_value(value: object) -> str:
     return ""
 
 
+def _error_diagnostic(env: dict) -> str:
+    """Diagnostic text from a structured error object, if present.
+
+    Copilot `tool.execution_complete` may carry `error: {code, message}`.
+    The message is part of the tool's diagnostic output (verified live),
+    so it is surfaced for detection; callers combine it with the primary
+    payload text rather than letting it hide inside the envelope.
+    """
+    err = env.get("error", "")
+    if isinstance(err, dict):
+        for key in ("message", "content", "details"):
+            text = _text_from_value(err.get(key, ""))
+            if isinstance(text, str) and text.strip():
+                return text
+    return ""
+
+
+def _with_error_diagnostic(text: str, env: dict) -> str:
+    err = _error_diagnostic(env)
+    if err and err not in text:
+        return text + "\n" + err
+    return text
+
+
 def extract_text(msg: dict) -> str:
     """Extract message text from top-level or enveloped content.
 
     Order: explicit top-level `content` (existing vendors), then Copilot
     Chronicle `data.content`, then `payload.content` (tolerance matching
     upstream envelope handling). Tool payloads additionally try
-    result/output/summary keys. Returns "" when nothing interpretable
+    result/output/summary keys, plus a structured `error.message`
+    diagnostic (combined, never replacing the primary payload).
+    Returns "" when nothing interpretable
     exists; callers distinguish that from real content for coverage.
     Never stringifies whole event envelopes.
     """
@@ -413,19 +439,92 @@ def extract_text(msg: dict) -> str:
         if isinstance(env, dict):
             text = _text_from_value(env.get("content", ""))
             if text.strip():
-                return text[:MAX_CHARS_PER_EVENT]
+                return _with_error_diagnostic(
+                    text, env)[:MAX_CHARS_PER_EVENT]
             for key in ("result", "output", "summary", "message"):
                 text = _text_from_value(env.get(key, ""))
                 if text.strip():
-                    return text[:MAX_CHARS_PER_EVENT]
+                    return _with_error_diagnostic(
+                        text, env)[:MAX_CHARS_PER_EVENT]
+            err = _error_diagnostic(env)
+            if err.strip():
+                return err[:MAX_CHARS_PER_EVENT]
     return ""
 
 
-def extract_signals(role: str, text: str, ref: str, prov: str | None = None) -> list[dict]:
+# Strong failure shapes for tool output that a SUCCESSFUL execution
+# returned. Rationale (verified live on Copilot CLI 1.0.94-3): a tool that
+# reports success returned CONTENT, not a failure â€” `$ErrorActionPreference
+# = "Stop"` in viewed source, `throw new Error(...)`, prose like "it still
+# failed to refresh", or "0 errors" in a passing build are incidental
+# error-vocabulary, not runtime failures. Bare keywords (`error`, `failed`,
+# ...) therefore do NOT qualify here; only structured diagnostic shapes do.
+# Executions WITHOUT a success status (other vendors' plain tool messages,
+# envelopes without status fields) keep the legacy broad patterns so no
+# genuine failure evidence is lost where no status exists to consult.
+_STRONG_TOOL_ERROR = [
+    r"traceback \(most recent call last\)",
+    r"exception in thread",
+    r"uncaught (exception|error)\b",
+    r"\w+(error|exception|failure)\s*:\s*\S",
+    r"exit (code|status)\s*[:=]?\s*[1-9]\d*",
+    r"[1-9]\d* (tests? )?(failed|failing|errors?)\b",
+    r"tests? (failed|failing)\b",
+    r"build (failed|failure|broken)\b",
+    r"permission denied|access (is )?denied\b|EACCES|EPERM",
+    r"ENOENT|no such file|cannot find|can'?t find|file not found",
+    r"timed? ?out (after|in)\b|operation timed out",
+    r"segmentation fault|core dumped",
+]
+_COMPILED_STRONG_TOOL_ERROR = [re.compile(r"\b(?:" + p + r")", re.I)
+                               for p in _STRONG_TOOL_ERROR]
+
+
+def tool_status(msg: dict) -> dict | None:
+    """Structured execution status from a tool event envelope, if present.
+
+    Copilot Chronicle `tool.execution_complete` carries `success:bool`
+    plus optional `shellExecution.exitCode` and an `error` object (verified:
+    3327/3327 live completions carry `success`). Returns None when the
+    envelope carries no status at all (other vendors' plain tool messages),
+    in which case callers keep legacy behavior. Never invents a status.
+    """
+    if not isinstance(msg, dict):
+        return None
+    data = msg.get("data")
+    if not isinstance(data, dict):
+        return None
+    if ("success" not in data and "shellExecution" not in data
+            and "error" not in data):
+        return None
+    success = data.get("success")
+    exit_code: int | None = None
+    shell = data.get("shellExecution")
+    if isinstance(shell, dict):
+        ec = shell.get("exitCode")
+        if isinstance(ec, bool):
+            exit_code = None
+        elif isinstance(ec, (int, float)):
+            exit_code = int(ec)
+    err = data.get("error")
+    has_error = isinstance(err, dict) and bool(err)
+    failed = (success is False) or (
+        exit_code is not None and exit_code != 0) or has_error
+    return {"success": success, "exit_code": exit_code,
+            "has_error": has_error, "failed": failed,
+            "ok": success is True and not failed}
+
+
+def extract_signals(role: str, text: str, ref: str, prov: str | None = None,
+                    tool_status: dict | None = None) -> list[dict]:
     """Heuristic per-message signal detection. All matches are DERIVED.
 
     prov gates eligibility; when omitted it is derived (kept for
-    backward-compatible direct callers in tests).
+    backward-compatible direct callers in tests). `tool_status` carries the
+    structured execution status for tool envelopes (see tool_status());
+    a tool execution that reports SUCCESS only yields `error_mention` on
+    strong diagnostic shapes, never on bare error vocabulary. Failed or
+    status-less tool output keeps the legacy broad patterns.
     """
     is_user = (role == "user")
     if prov is None:
@@ -441,6 +540,9 @@ def extract_signals(role: str, text: str, ref: str, prov: str | None = None) -> 
         patterns = _COMPILED[stype]
         if prov == "user_text" and _USER_PATTERNS.get(stype):
             patterns = _USER_PATTERNS[stype]
+        elif (stype == "error_mention" and prov == "tool_result"
+                and (tool_status or {}).get("ok")):
+            patterns = _COMPILED_STRONG_TOOL_ERROR
         if any(p.search(folded) for p in patterns):
             found.append({"type": stype, "excerpt": _excerpt(raw[:400]),
                           "ref": ref, "prov": prov})
@@ -567,7 +669,9 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
     ordered_signals: list[dict] = []
     signal_idx: list[int] = []
     for i, role, prov, text, msg_time in scanned:
-        found = extract_signals(role, text, f"{session_id}#msg{i}", prov)
+        status = tool_status(raw[i]) if role == "tool" else None
+        found = extract_signals(role, text, f"{session_id}#msg{i}", prov,
+                                tool_status=status)
         for signal in found:
             signal["period"] = _signal_period(msg_time, bound_start, bound_end)
         if found:

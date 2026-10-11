@@ -608,5 +608,312 @@ class CopilotEndToEndTest(unittest.TestCase):
         self.assertEqual(norm["coverage"]["sessions_content_none"], 0)
 
 
+def tool_complete(text, success=True, extra=None, call="t1",
+                  ts="2026-10-10T10:02:00.000Z", nested=True):
+    """A synthetic tool.execution_complete mirroring the live envelope.
+
+    nested=True puts text under data.result.content (the real Copilot
+    shape); nested=False uses a flat data.output string. `success`
+    controls the structured status; extra merges additional data keys
+    (e.g. shellExecution, error).
+    """
+    data = {"toolCallId": call, "success": success}
+    if nested:
+        data["result"] = {"content": text}
+    else:
+        data["output"] = text
+    if extra:
+        data.update(extra)
+    return {"type": "tool.execution_complete", "data": data,
+            "timestamp": ts}
+
+
+def quiet_user(text="please proceed", ts="2026-10-10T10:01:00.000Z"):
+    return {"type": "user.message", "data": {"content": text},
+            "timestamp": ts}
+
+
+class ToolStatusHelperTest(unittest.TestCase):
+    def test_ok_success(self):
+        st = normalize_cass.tool_status(
+            {"type": "t", "data": {"success": True}})
+        self.assertEqual(st, {"success": True, "exit_code": None,
+                              "has_error": False, "failed": False,
+                              "ok": True})
+
+    def test_failed_explicit_false(self):
+        st = normalize_cass.tool_status(
+            {"type": "t", "data": {"success": False}})
+        self.assertTrue(st["failed"])
+        self.assertFalse(st["ok"])
+
+    def test_failed_nonzero_exit_overrides_success_flag(self):
+        st = normalize_cass.tool_status(
+            {"type": "t", "data": {"success": True,
+                                   "shellExecution": {"exitCode": 1}}})
+        self.assertTrue(st["failed"])
+        self.assertFalse(st["ok"])
+        self.assertEqual(st["exit_code"], 1)
+
+    def test_failed_error_object(self):
+        st = normalize_cass.tool_status(
+            {"type": "t", "data": {"success": True,
+                                   "error": {"code": "E1",
+                                             "message": "boom"}}})
+        self.assertTrue(st["failed"])
+        self.assertFalse(st["ok"])
+
+    def test_zero_exit_is_ok(self):
+        st = normalize_cass.tool_status(
+            {"type": "t", "data": {"success": True,
+                                   "shellExecution": {"exitCode": 0}}})
+        self.assertTrue(st["ok"])
+
+    def test_unknown_without_status_fields(self):
+        self.assertIsNone(normalize_cass.tool_status(
+            {"role": "tool", "content": "Error: boom"}))
+        self.assertIsNone(normalize_cass.tool_status(
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1"}}))
+        self.assertIsNone(normalize_cass.tool_status("not-a-dict"))
+        self.assertIsNone(normalize_cass.tool_status(None))
+
+
+class ToolErrorPrecisionTest(unittest.TestCase):
+    """Bare error vocabulary in SUCCESSFUL tool output is incidental
+    content (viewed source, docs, passing builds), not failure evidence."""
+
+    def assert_no_error(self, events):
+        entry, messages = copilot_session(events=events)
+        findings, _ = run_pipeline([(entry, messages)])
+        self.assertEqual(finding_types(findings).get("error_mention", []), [])
+
+    def test_powershell_boilerplate(self):
+        self.assert_no_error([
+            quiet_user(),
+            tool_complete('[CmdletBinding()] param( [switch]$Login ) '
+                          '$ErrorActionPreference = "Stop"'),
+        ])
+
+    def test_try_catch_throw_source(self):
+        self.assert_no_error([
+            quiet_user(),
+            tool_complete("function f() {\n  try {\n    run();\n  } catch "
+                          "(e) {\n    throw new Error('bad state');\n  }\n}"),
+        ])
+
+    def test_readme_error_handling(self):
+        self.assert_no_error([
+            quiet_user(),
+            tool_complete("# Errors\n\nThis library throws Error objects "
+                          "on failure. Handle exceptions with try/catch. "
+                          "0 errors in the last passing build."),
+        ])
+
+    def test_research_doc_failure_prose(self):
+        self.assert_no_error([
+            quiet_user(),
+            tool_complete("Scan window: 2026-09-08 to 2026-10-08. The sync "
+                          "has a transient issue, but this time it still "
+                          "failed to refresh after a day."),
+        ])
+
+    def test_passing_build_zero_errors(self):
+        self.assert_no_error([
+            quiet_user(),
+            tool_complete("Build succeeded. 0 errors, 0 warnings. "
+                          "Tests: 42 passed."),
+        ])
+
+    def test_error_inside_identifier(self):
+        self.assert_no_error([
+            quiet_user(),
+            tool_complete("const errorHandler = require('./handler'); "
+                          "terrorCount = 0;"),
+        ])
+
+    def test_detailed_content_boilerplate(self):
+        entry, messages = copilot_session(events=[
+            quiet_user(),
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1", "success": True,
+                      "result": {"content": "file shown",
+                                 "detailedContent": "$ErrorActionPreference"
+                                 " = \"Stop\"\n$errorLog = @()"}},
+             "timestamp": "2026-10-10T10:02:00.000Z"},
+        ])
+        findings, _ = run_pipeline([(entry, messages)])
+        self.assertEqual(finding_types(findings).get("error_mention", []), [])
+
+    def test_tool_text_never_user_signals(self):
+        entry, messages = copilot_session(events=[
+            quiet_user(),
+            tool_complete("I have to do this manually every time, "
+                          "that is not what I asked"),
+        ])
+        findings, _ = run_pipeline([(entry, messages)])
+        by_type = finding_types(findings)
+        self.assertFalse(by_type.get("user_correction", []))
+        self.assertFalse(by_type.get("manual_procedure", []))
+
+
+class ToolErrorRecallTest(unittest.TestCase):
+    """Genuine failures stay detectable through every status path."""
+
+    def assert_tool_error(self, events):
+        entry, messages = copilot_session(events=events)
+        findings, _ = run_pipeline([(entry, messages)])
+        errors = finding_types(findings).get("error_mention", [])
+        self.assertTrue(errors)
+        self.assertTrue(any("tool_result" in e.get("provenance", [])
+                            for e in errors))
+        return errors
+
+    def test_structured_failure_keeps_broad_match(self):
+        self.assert_tool_error([
+            quiet_user(),
+            tool_complete("FAILED: timeout at step 3", success=False),
+        ])
+
+    def test_nonzero_exit_code(self):
+        self.assert_tool_error([
+            quiet_user(),
+            tool_complete("Error: build broke on step 3", success=True,
+                          extra={"shellExecution": {"exitCode": 1}}),
+        ])
+
+    def test_error_object(self):
+        self.assert_tool_error([
+            quiet_user(),
+            tool_complete("could not complete the run", success=True,
+                          extra={"error": {"code": "EIO",
+                                           "message": "denied"}}),
+        ])
+
+    def test_error_object_alone_surfaces(self):
+        entry, messages = copilot_session(events=[
+            quiet_user(),
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1", "success": False,
+                      "error": {"code": "ENOENT", "message": "not found"}},
+             "timestamp": "2026-10-10T10:02:00.000Z"},
+        ])
+        findings, _ = run_pipeline([(entry, messages)])
+        errors = finding_types(findings).get("error_mention", [])
+        self.assertTrue(errors)
+
+    def test_traceback_despite_success(self):
+        self.assert_tool_error([
+            quiet_user(),
+            tool_complete("Traceback (most recent call last):\n  File "
+                          '"x", line 1\nValueError: bad value'),
+        ])
+
+    def test_python_exception_line_despite_success(self):
+        self.assert_tool_error([
+            quiet_user(),
+            tool_complete("running checks\nPermissionError: [Errno 13] "
+                          "Permission denied"),
+        ])
+
+    def test_file_not_found_despite_success(self):
+        self.assert_tool_error([
+            quiet_user(),
+            tool_complete("ENOENT: no such file or directory, open "
+                          "'./missing.txt'"),
+        ])
+
+    def test_test_summary_counts_despite_success(self):
+        self.assert_tool_error([
+            quiet_user(),
+            tool_complete("Tests finished: 39 passed, 3 failed."),
+        ])
+
+    def test_unknown_status_keeps_legacy_behavior(self):
+        entry, messages = copilot_session(events=[
+            quiet_user(),
+            tool_complete("Error: boom", success=True, nested=False),
+        ])
+        del messages[1]["data"]["success"]  # no status: other-vendor shape
+        findings, _ = run_pipeline([(entry, messages)])
+        errors = finding_types(findings).get("error_mention", [])
+        self.assertTrue(errors)
+
+    def test_failed_without_keyword_stays_conservative(self):
+        # Structured failure but no textual anchor: no invented signal.
+        entry, messages = copilot_session(events=[
+            quiet_user(),
+            tool_complete("done", success=False),
+        ])
+        findings, _ = run_pipeline([(entry, messages)])
+        self.assertEqual(finding_types(findings).get("error_mention", []), [])
+
+    def test_user_reported_error_preserved(self):
+        entry, messages = copilot_session(events=[
+            {"type": "user.message",
+             "data": {"content": "I got an error when I run the sync"},
+             "timestamp": "2026-10-10T10:01:00.000Z"},
+        ])
+        findings, _ = run_pipeline([(entry, messages)])
+        errors = finding_types(findings).get("error_mention", [])
+        self.assertTrue(errors)
+        self.assertTrue(any("user_text" in e.get("provenance", [])
+                            for e in errors))
+
+    def test_assistant_reported_failure_preserved(self):
+        entry, messages = copilot_session(events=[
+            quiet_user(),
+            {"type": "assistant.message",
+             "data": {"content": "The build failed because the config "
+                                 "was missing."},
+             "timestamp": "2026-10-10T10:01:05.000Z"},
+        ])
+        findings, _ = run_pipeline([(entry, messages)])
+        errors = finding_types(findings).get("error_mention", [])
+        self.assertTrue(errors)
+
+
+class CopilotPrecisionAggregationTest(unittest.TestCase):
+    def _sessions(self, tool_text, success, n=3):
+        defs = []
+        for i in range(n):
+            workspace = f"proj-{i}" if i < 2 else "proj-0"
+            entry, _ = copilot_session(
+                sid=f"copilot-s{i}", workspace=workspace, events=[
+                    quiet_user(),
+                    tool_complete(tool_text, success=success,
+                                  call=f"t{i}"),
+                ])
+            msgs = [quiet_user(),
+                    tool_complete(tool_text, success=success, call=f"t{i}")]
+            defs.append((entry, msgs))
+        return defs
+
+    def test_repeated_boilerplate_never_promotes(self):
+        findings, _ = run_pipeline(self._sessions(
+            '[CmdletBinding()] param( [switch]$Login ) '
+            '$ErrorActionPreference = "Stop"', success=True))
+        self.assertEqual(
+            finding_types(findings).get("error_mention", []), [])
+
+    def test_repeated_doc_text_never_promotes(self):
+        findings, _ = run_pipeline(self._sessions(
+            "Scan window: 2026-09-08 to 2026-10-08. The sync has a "
+            "transient issue, but this time it still failed to refresh.",
+            success=True))
+        self.assertEqual(
+            finding_types(findings).get("error_mention", []), [])
+
+    def test_repeated_genuine_failures_stay_eligible(self):
+        findings, _ = run_pipeline(self._sessions(
+            "FAILED: connection refused at db:5432", success=False))
+        errors = finding_types(findings).get("error_mention", [])
+        self.assertTrue(errors)
+        total = sum(f["occurrences"] for f in errors)
+        self.assertEqual(total, 3)
+        for finding in errors:
+            self.assertIn("tool_result", finding["provenance"])
+
+
 if __name__ == "__main__":
     unittest.main()

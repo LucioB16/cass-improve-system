@@ -219,7 +219,8 @@ def render(findings: dict) -> str:
     partial_count = coverage.get("sessions_content_partial", 0)
     if partial_count:
         lines.append(f"- {partial_count} session(s) were only partially decoded; "
-                     f"some events used unrecognized formats.")
+                     f"some events used unrecognized formats or carried "
+                     f"no decodable text (e.g. empty tool-call turns).")
         lines.append("")
     lines.append(f"- skipped/failed sessions: {coverage.get('sessions_skipped', 0)} "
                  "(exports that CASS could not provide; see normalization metadata).")
