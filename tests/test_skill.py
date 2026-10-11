@@ -900,6 +900,156 @@ class SignalPeriodTest(unittest.TestCase):
             self.assertRegex(signal["ref"], r"#msg\d+$")
 
 
+class SynthesizedRetryPeriodTest(unittest.TestCase):
+    BOUNDS = ("2026-09-11T00:00:00+00:00", "2026-10-11T23:59:59+00:00")
+    ERROR = "build failed: auth timeout"
+
+    def _session(self, sid, workspace, stamps):
+        messages = []
+        for stamp in stamps:
+            msg = {"role": "assistant", "content": self.ERROR}
+            if stamp is not None:
+                msg["created_at"] = stamp
+            messages.append(msg)
+        return {"path": sid, "agent": "codex", "workspace": workspace,
+                "source_id": "local",
+                "_period_start": self.BOUNDS[0], "_period_end": self.BOUNDS[1],
+                "_messages": messages}
+
+    def _run(self, defs):
+        inv = {"period": {}, "coverage": {}, "sessions": []}
+        exports = {}
+        for sid, workspace, stamps in defs:
+            entry = self._session(sid, workspace, stamps)
+            messages = entry.pop("_messages")
+            inv["sessions"].append(entry)
+            exports[sid] = (messages, False)
+
+        def fake_export(path, source_id="local", timeout_s=120, retries=3):
+            return exports[path]
+
+        with mock.patch.object(normalize_cass, "export_session",
+                               side_effect=fake_export):
+            norm = normalize_cass.normalize_inventory(inv)
+        findings = analyze.analyze(norm)
+        return findings, norm
+
+    def _retries(self, norm):
+        return [s for sess in norm["sessions"] for s in sess["signals"]
+                if s["type"] == "retry_loop" and s.get("synthesized")]
+
+    def test_pre_window_only_never_in_window(self):
+        pre = "2026-08-10T10:00:00Z"
+        _, norm = self._run([("s", "p", [pre, pre, pre])])
+        retries = self._retries(norm)
+        self.assertTrue(retries)
+        for signal in retries:
+            self.assertEqual(signal["period"], "pre_window")
+
+    def test_pre_window_only_cannot_promote_across_sessions(self):
+        pre = "2026-08-10T10:00:00Z"
+        findings, _ = self._run([
+            ("s1", "p1", [pre, pre, pre]),
+            ("s2", "p2", [pre, pre, pre]),
+            ("s3", "p1", [pre, pre, pre]),
+        ])
+        promoted = [f for f in findings["candidates"] + findings["watch_list"]
+                    if f["signal_type"] == "retry_loop"]
+        self.assertEqual(promoted, [])
+
+    def test_in_window_recurrence_synthesizes_in_window(self):
+        now = "2026-10-02T10:00:00Z"
+        _, norm = self._run([("s", "p", [now, now, now])])
+        retries = self._retries(norm)
+        self.assertTrue(retries)
+        for signal in retries:
+            self.assertEqual(signal["period"], "in_window")
+
+    def test_split_recurrence_synthesizes_nothing(self):
+        _, norm = self._run([("s", "p", [
+            "2026-08-10T10:00:00Z", "2026-08-11T10:00:00Z",
+            "2026-10-02T10:00:00Z"])])
+        self.assertEqual(self._retries(norm), [])
+
+    def test_minority_pre_plus_majority_in_synthesizes_in_window(self):
+        _, norm = self._run([("s", "p", [
+            "2026-08-10T10:00:00Z", "2026-10-02T10:00:00Z",
+            "2026-10-03T10:00:00Z", "2026-10-04T10:00:00Z"])])
+        retries = self._retries(norm)
+        self.assertEqual(len(retries), 1)
+        self.assertEqual(retries[0]["period"], "in_window")
+
+    def test_legacy_unbounded_preserved(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "s", "agent": "codex", "workspace": "p",
+                             "source_id": "local"}]}
+        messages = [{"role": "assistant", "content": self.ERROR}
+                    for _ in range(3)]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            norm = normalize_cass.normalize_inventory(inv)
+        analyze.analyze(norm)
+        retries = self._retries(norm)
+        self.assertTrue(retries)
+        for signal in retries:
+            self.assertEqual(signal["period"], "unbounded")
+
+    def test_unknown_evidence_never_in_window(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "s", "agent": "codex", "workspace": "p",
+                             "source_id": "local",
+                             "_period_start": self.BOUNDS[0],
+                             "_period_end": self.BOUNDS[1]}]}
+        messages = [{"role": "assistant", "content": self.ERROR}
+                    for _ in range(3)]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            norm = normalize_cass.normalize_inventory(inv)
+        analyze.analyze(norm)
+        retries = self._retries(norm)
+        self.assertTrue(retries)
+        for signal in retries:
+            self.assertEqual(signal["period"], "unknown")
+
+    def test_post_window_evidence_never_in_window(self):
+        post = "2026-11-01T10:00:00Z"
+        _, norm = self._run([("s", "p", [post, post, post])])
+        retries = self._retries(norm)
+        self.assertTrue(retries)
+        for signal in retries:
+            self.assertEqual(signal["period"], "post_window")
+
+    def test_mixed_history_and_current_stay_honest(self):
+        _, norm = self._run([("s", "p", [
+            "2026-08-10T10:00:00Z", "2026-08-11T10:00:00Z",
+            "2026-08-12T10:00:00Z", "2026-10-02T10:00:00Z",
+            "2026-10-03T10:00:00Z", "2026-10-04T10:00:00Z"])])
+        by_period = {}
+        for signal in self._retries(norm):
+            by_period[signal["period"]] = by_period.get(signal["period"], 0) + 1
+        self.assertEqual(by_period, {"pre_window": 1, "in_window": 1})
+
+    def test_source_selection_is_numeric_not_lexicographic(self):
+        session = {"session_id": "s", "agent": "codex", "workspace": "p",
+                   "signals": [
+                       {"type": "error_mention", "excerpt": self.ERROR,
+                        "ref": "s#msg9", "prov": "assistant_text",
+                        "period": "in_window"},
+                       {"type": "error_mention", "excerpt": self.ERROR,
+                        "ref": "s#msg10", "prov": "assistant_text",
+                        "period": "in_window"},
+                       {"type": "error_mention", "excerpt": self.ERROR,
+                        "ref": "s#msg100", "prov": "assistant_text",
+                        "period": "in_window"},
+                   ]}
+        self.assertEqual(analyze.synthesize_session_retries([session]), 1)
+        retries = [s for s in session["signals"] if s.get("synthesized")]
+        self.assertEqual(len(retries), 1)
+        self.assertEqual(retries[0]["ref"], "s#msg100")
+        self.assertEqual(retries[0]["period"], "in_window")
+        self.assertEqual(retries[0]["source_count"], 3)
+
+
 class ReadOnlyTest(unittest.TestCase):
     def test_pipeline_writes_no_files(self):
         before = set(os.listdir(BASE))

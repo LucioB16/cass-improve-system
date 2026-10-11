@@ -802,3 +802,8 @@ Driven by the real 30-day v1.4.0 retrospective (207 sessions, 3 harnesses,
   genuine finding still promotes from in-window evidence; WAL/report-only intact.
 - [x] Docs where behavior changed; full suite + CI green; atomic commits;
   push; tree clean.
+- [x] Corrective (post independent acceptance): synthesized retry signals
+  carry period derived from the recurrence-satisfying evidence class
+  (never default unbounded for bounded corpora); numeric original-index
+  ordering for source selection (msg100 > msg10 > msg9); per-case
+  regression tests; E2E re-validation; no release.

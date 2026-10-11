@@ -32,7 +32,21 @@ CI (`.github/workflows/ci.yml`, matrix windows/ubuntu/macos) runs the unit
 suite plus an isolated-HOME install → verify → reinstall → uninstall
 exercise using the real wrappers; no private CASS history required.
 
-## End-to-end validation (live CASS 0.10.0, Phase 22 build, 30-day corpus)
+## End-to-end validation (live CASS 0.10.0, Phase 22 corrective build, 30-day corpus)
+
+- Stock 30d review via the reinstalled canonical skill: 207 discovered
+  (COMPLETE), 207 analyzed, 0 skipped, 142 WAL-recovered; opencode +
+  codex + antigravity; 24 workspaces.
+- Synthesized retry signals all carry explicit period; zero lack it.
+- Pre-window-only recurrence contributes zero in-window evidence
+  (the exact independent failure construction now yields no promotion;
+  verified before/after: HIGH with phantom in_window=12 → nothing promoted).
+- 0 high / 1 medium (a repeated user-authored request template with
+  genuine in-window repetition — defensible, reviewer-judged).
+- WAL recovery, report-only behavior, and install/compat architecture
+  unchanged.
+
+### Earlier 30d run (pre-corrective, historical)
 
 - Stock 30d review via the reinstalled canonical skill: 207 discovered
   (COMPLETE inventory, limit 1000), 207 analyzed, 0 skipped, 142

@@ -93,28 +93,52 @@ def _read_stdin_text() -> str:
     return data
 
 
+def _msg_index(ref: object) -> int:
+    """Numeric original message index from a session ref (s#msg100).
+    Lexicographic ordering would rank msg100 below msg9; numeric is correct."""
+    match = re.search(r"#msg(\d+)$", str(ref or ""))
+    return int(match.group(1)) if match else -1
+
+
 def synthesize_session_retries(sessions: list[dict]) -> int:
-    """Session-level retry evidence: the same error fingerprint recurring in
-    3+ distinct messages of one session means repeated unsuccessful attempts,
-    even when no single message says so. Synthesized retry_loop signals carry
-    the later occurrence as ref. Returns the number synthesized."""
+    """Session-level retry evidence, scoped by period class.
+
+    The same error fingerprint recurring in 3+ distinct messages means
+    repeated unsuccessful attempts — but only within the period class that
+    actually contains the recurrence. A pre_window-only group synthesizes a
+    pre_window retry (historical context, never current-period evidence);
+    mixed groups (e.g. 2 pre + 1 in) synthesize nothing, because no single
+    period class satisfies the recurrence condition. Legacy unbounded
+    evidence groups together for backward compatibility.
+    """
     made = 0
     for session in sessions:
-        by_fp: dict[str, list[dict]] = {}
+        by_key: dict[tuple[str, str], list[dict]] = {}
         for signal in session.get("signals", []):
             if signal.get("type") != "error_mention":
                 continue
-            by_fp.setdefault(fingerprint(signal.get("excerpt", "")), []).append(signal)
-        for group in by_fp.values():
+            period = signal.get("period", "unbounded")
+            by_key.setdefault(
+                (fingerprint(signal.get("excerpt", "")), period), []).append(signal)
+        for (_, period), group in by_key.items():
             refs = {g.get("ref") for g in group}
             if len(group) >= 3 and len(refs) >= 3:
-                latest = max(group, key=lambda g: str(g.get("ref", "")))
+                latest = max(group, key=lambda g: _msg_index(g.get("ref")))
+                exists = any(s.get("type") == "retry_loop"
+                             and s.get("synthesized") == "session-recurrence"
+                             and s.get("ref") == latest.get("ref")
+                             and s.get("period") == period
+                             for s in session.get("signals", []))
+                if exists:
+                    continue  # idempotent: already synthesized for this group
                 session["signals"].append({
                     "type": "retry_loop",
                     "excerpt": latest.get("excerpt", "")[:300],
                     "ref": latest.get("ref", session.get("session_id", "?")),
                     "prov": latest.get("prov", "unknown"),
+                    "period": period,
                     "synthesized": "session-recurrence",
+                    "source_count": len(refs),
                 })
                 made += 1
     return made
