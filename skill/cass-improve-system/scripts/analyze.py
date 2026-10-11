@@ -53,10 +53,23 @@ def fingerprint(text: str) -> str:
     return hashlib.sha1(" ".join(sorted(top)).encode()).hexdigest()[:12]
 
 
-def confidence(sessions: int, projects: int, occurrences: int, stype: str) -> str:
-    if sessions >= 3 and projects >= 2:
-        return "high"
-    if sessions >= 2 or (stype == "user_correction" and occurrences >= 2):
+def confidence(n_sessions: int, n_projects: int, occurrences: int,
+               stype: str, has_user_evidence: bool) -> str:
+    """Provenance-aware confidence.
+
+    User-backed findings use the standard thresholds. Findings with no
+    user-authored evidence are capped: systemic spread (3+ sessions across
+    2+ projects, e.g. a genuine recurring tool failure) can reach medium,
+    but nothing tool/assistant-only ever reaches high, and file-echo-only
+    noise stays low.
+    """
+    if has_user_evidence:
+        if n_sessions >= 3 and n_projects >= 2:
+            return "high"
+        if n_sessions >= 2 or (stype == "user_correction" and occurrences >= 2):
+            return "medium"
+        return "low"
+    if n_sessions >= 3 and n_projects >= 2:
         return "medium"
     return "low"
 
@@ -74,8 +87,36 @@ def _read_stdin_text() -> str:
     return data
 
 
+def synthesize_session_retries(sessions: list[dict]) -> int:
+    """Session-level retry evidence: the same error fingerprint recurring in
+    3+ distinct messages of one session means repeated unsuccessful attempts,
+    even when no single message says so. Synthesized retry_loop signals carry
+    the later occurrence as ref. Returns the number synthesized."""
+    made = 0
+    for session in sessions:
+        by_fp: dict[str, list[dict]] = {}
+        for signal in session.get("signals", []):
+            if signal.get("type") != "error_mention":
+                continue
+            by_fp.setdefault(fingerprint(signal.get("excerpt", "")), []).append(signal)
+        for group in by_fp.values():
+            refs = {g.get("ref") for g in group}
+            if len(group) >= 3 and len(refs) >= 3:
+                latest = max(group, key=lambda g: str(g.get("ref", "")))
+                session["signals"].append({
+                    "type": "retry_loop",
+                    "excerpt": latest.get("excerpt", "")[:300],
+                    "ref": latest.get("ref", session.get("session_id", "?")),
+                    "prov": latest.get("prov", "unknown"),
+                    "synthesized": "session-recurrence",
+                })
+                made += 1
+    return made
+
+
 def analyze(normalized: dict) -> dict:
     sessions = normalized.get("sessions", [])
+    synthesize_session_retries(sessions)
     clusters: dict[tuple[str, str], dict] = {}
     for session in sessions:
         sid = session.get("session_id", "?")
@@ -88,12 +129,15 @@ def analyze(normalized: dict) -> dict:
                 "session_ids": set(),
                 "agents": set(),
                 "workspaces": set(),
+                "prov_counts": {},
                 "excerpts": [],
             })
             bucket["occurrences"] += 1
             bucket["session_ids"].add(sid)
             bucket["agents"].add(str(session.get("agent", "?")))
             bucket["workspaces"].add(str(session.get("workspace", "?")))
+            prov = signal.get("prov", "unknown")
+            bucket["prov_counts"][prov] = bucket["prov_counts"].get(prov, 0) + 1
             if len(bucket["excerpts"]) < 3:
                 bucket["excerpts"].append({
                     "ref": signal.get("ref", sid),
@@ -103,7 +147,8 @@ def analyze(normalized: dict) -> dict:
     for (stype, fp), bucket in clusters.items():
         n_sessions = len(bucket["session_ids"])
         n_projects = len(bucket["workspaces"])
-        conf = confidence(n_sessions, n_projects, bucket["occurrences"], stype)
+        has_user = bucket["prov_counts"].get("user_text", 0) > 0
+        conf = confidence(n_sessions, n_projects, bucket["occurrences"], stype, has_user)
         first_words = " ".join(bucket["excerpts"][0]["excerpt"].split()[:8]) \
             if bucket["excerpts"] else ""
         finding = {
@@ -117,6 +162,8 @@ def analyze(normalized: dict) -> dict:
             "cross_project": n_projects >= 2,
             "confidence": conf,
             "destinations": DESTINATIONS.get(stype, ["EPHEMERAL"]),
+            "provenance": dict(sorted(bucket["prov_counts"].items())),
+            "related_ids": [],
             "evidence": bucket["excerpts"],
         }
         if conf == "high":
@@ -128,6 +175,18 @@ def analyze(normalized: dict) -> dict:
     rank = {"high": 0, "medium": 1, "low": 2}
     for group in (candidates, watch, ignored):
         group.sort(key=lambda f: (rank[f["confidence"]], -f["session_count"], -f["project_count"]))
+    # Event grouping: findings sharing an evidence fingerprint (different
+    # signal types, same underlying event) link to each other. IDs stay
+    # stable and unique; the report shows the relation without re-rendering.
+    by_fp: dict[str, list[dict]] = {}
+    for finding in candidates + watch + ignored:
+        fp = finding["id"].split(":", 1)[1]
+        by_fp.setdefault(fp, []).append(finding)
+    for group in by_fp.values():
+        if len(group) > 1:
+            ids = sorted(f["id"] for f in group)
+            for finding in group:
+                finding["related_ids"] = [i for i in ids if i != finding["id"]]
     return {
         "period": normalized.get("period", {}),
         "coverage": normalized.get("coverage", {}),

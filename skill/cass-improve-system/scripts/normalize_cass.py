@@ -60,7 +60,56 @@ def infer_role(msg: dict) -> str:
             mtype in ("PLANNER_RESPONSE", "ASSISTANT_MESSAGE",
                       "AGENT_RESPONSE", "MODEL_RESPONSE"):
         return "assistant"
+    if source == "SYSTEM" or mtype in ("SYSTEM_MESSAGE", "CHECKPOINT"):
+        return "system"
     return "?"
+
+
+# Envelope markers are structural framing, not prose: tool executions and
+# injected context arrive wrapped in them (verified: 404/638 assistant
+# messages in live OpenCode exports open with [Tool Output]).
+_TOOL_ENVELOPES = ("[tool output]", "<tool_result>", "<toolresult>")
+_SYSTEM_ENVELOPES = ("[context]", "<context>", "[system]")
+
+_PROVENANCE = ("user_text", "assistant_text", "tool_result", "system", "unknown")
+
+
+def derive_provenance(role: str, text: str) -> str:
+    """Classify a normalized message into a provenance bucket using only
+    structured role info plus structural envelope markers. Never prose."""
+    lowered = (text or "").lstrip()[:40].lower()
+    if role == "user":
+        return "user_text"
+    if role == "tool":
+        return "tool_result"
+    if role == "system":
+        return "system"
+    if role == "assistant":
+        if lowered.startswith(_TOOL_ENVELOPES):
+            return "tool_result"
+        if lowered.startswith(_SYSTEM_ENVELOPES):
+            return "system"
+        return "assistant_text"
+    return "unknown"
+
+
+# Signal eligibility by provenance. Rationale:
+# - correction/rediscovery/manual describe USER friction: only user-authored
+#   text counts (a plan file echoing "manualmente" is not user friction).
+# - retry phrases count only when the user reports them; tool-side "retry"
+#   vocabulary is handled by session-level recurrence in analyze.py.
+# - success counts user + assistant prose (assistant "shipped" is weak but
+#   harmless; confidence separates them).
+# - error counts user + assistant prose + tool diagnostics; provenance is
+#   recorded per signal so confidence can weight corroboration.
+_ELIGIBLE: dict[str, set[str]] = {
+    "user_correction": {"user_text"},
+    "rediscovery": {"user_text"},
+    "manual_procedure": {"user_text"},
+    "success_pattern": {"user_text", "assistant_text"},
+    "error_mention": {"user_text", "assistant_text", "tool_result"},
+    "retry_loop": {"user_text"},
+}
 
 
 def parse_time(value: object) -> str | None:
@@ -124,16 +173,27 @@ _PATTERNS: dict[str, dict[str, object]] = {
             r"no(,|\s)+(eso\s+)?no es (lo que|asi|correcto)",
             r"te (equivocas|equivocaste|confundiste)",
             r"estas mal",
-            r"no(,|\s)+(era|queria|quiero|me referia|necesito)",
+            r"no(,|\s)+(era|queria|me referia|necesito)",
+            r"no era eso",
+            r"no quiero (eso|esto|lo|lo otro|asi)\b",
             r"me referia a",
+            r"me habias dicho",
             r"lo que (quiero|pedi|te pedi|necesito)",
             r"no te pedi",
             r"eso no te (pedi|pregunte)",
             r"por que (interrumpiste|paraste|pausaste|cortaste)",
-            r"no\s+\w+\s+todavia",  # "no pases todavia": redirect, don't proceed
-            r"recorda( que|te|r que)",
-            r"acordate( que| de)",
-            r"vos (antes|me habias|dijiste|decis)",
+            # Prohibition + todavia needs an imperative verb: "no pases
+            # todavia" and "no hagas ningun cambio todavia" are redirects;
+            # "quiero que trabajes ... todavia" or "todavia no termine"
+            # are ordinary intent/status, not corrections.
+            r"no\s+(pases|pasa|sigas|sigue|sigan|hagas|haga|hagan|avances|"
+            r"avancen|implementes|toques|toquen|cambies|subas|borres|"
+            r"ejecutes|continues|frenes|pares)\w*\b.{0,30}\btodavia\b",
+            r"\btodavia\s+no\s+(hagas|haga|implementes|avances|toques)\w*\b",
+            r"\bfrena\b",
+            r"recorda( que|te que)",
+            r"acordate que",
+            r"vos (me habias dicho|dijiste|antes me habias|antes dijiste)",
         ],
     },
     "error_mention": {
@@ -234,17 +294,26 @@ def _excerpt(text: str) -> str:
     return text
 
 
-def extract_signals(role: str, text: str, ref: str) -> list[dict]:
-    """Heuristic per-message signal detection. All matches are DERIVED."""
+def extract_signals(role: str, text: str, ref: str, prov: str | None = None) -> list[dict]:
+    """Heuristic per-message signal detection. All matches are DERIVED.
+
+    prov gates eligibility; when omitted it is derived (kept for
+    backward-compatible direct callers in tests).
+    """
     is_user = (role == "user")
+    if prov is None:
+        prov = "user_text" if is_user else "assistant_text"
     folded = _fold(text or "")
     raw = text or ""
     found = []
     for stype, patterns in _COMPILED.items():
         if stype in _USER_ONLY and not is_user:
             continue
+        if prov not in _ELIGIBLE.get(stype, set()):
+            continue
         if any(p.search(folded) for p in patterns):
-            found.append({"type": stype, "excerpt": _excerpt(raw[:400]), "ref": ref})
+            found.append({"type": stype, "excerpt": _excerpt(raw[:400]),
+                          "ref": ref, "prov": prov})
     return found
 
 
@@ -317,26 +386,30 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
     session["metadata"]["total_messages"] = total
     # Full scan for signals FIRST so late-session behavior is discoverable;
     # retention below is only about which message bodies are kept.
-    scanned: list[tuple[int, str, str]] = []  # (index, role, text)
+    scanned: list[tuple[int, str, str, str]] = []  # (index, role, prov, text)
     user_idx: list[int] = []
     for i, msg in enumerate(raw):
         role = infer_role(msg)
         content = msg.get("content", "")
         text = content if isinstance(content, str) else json.dumps(content)[:4000]
-        scanned.append((i, role, text))
+        prov = derive_provenance(role, text)
+        scanned.append((i, role, prov, text))
         if role == "user":
             user_idx.append(i)
     ordered_signals: list[dict] = []
     signal_idx: list[int] = []
-    for i, role, text in scanned:
-        found = extract_signals(role, text, f"{session_id}#msg{i}")
+    for i, role, prov, text in scanned:
+        found = extract_signals(role, text, f"{session_id}#msg{i}", prov)
         if found:
             ordered_signals.append((i, found))
             signal_idx.append(i)
     session["signals"] = [s for _, group in ordered_signals for s in group]
     # Activity range from message timestamps, else inventory fields.
-    stamps = [t for _, _, t in
-              ((i, r, message_time(raw[i])) for i, r, _ in scanned) if t]
+    stamps = []
+    for i, _, _, _ in scanned:
+        parsed = message_time(raw[i])
+        if parsed:
+            stamps.append(parsed)
     if stamps:
         session["metadata"]["activity_start"] = min(stamps)
         session["metadata"]["activity_end"] = max(stamps)
@@ -360,7 +433,7 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
         session["metadata"]["sampling"] = (
             "stratified: signal-bearing + user turns first, then head/tail")
     session["metadata"]["retained_messages"] = len(keep)
-    by_index = {i: (role, text) for i, role, text in scanned}
+    by_index = {i: (role, text) for i, role, _, text in scanned}
     for i in keep:
         role, text = by_index[i]
         session["messages"].append({"role": role, "excerpt": _excerpt(text)})
@@ -389,6 +462,12 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
     recovered = sum(1 for s in ok if s["metadata"].get("recovered_from_panic"))
     outside = sum(1 for s in ok if s["metadata"].get("out_of_period"))
     unknown_ts = sum(1 for s in ok if s["metadata"].get("timestamps") == "none")
+    by_type: dict[str, int] = {}
+    by_prov: dict[str, int] = {}
+    for s in ok:
+        for sg in s["signals"]:
+            by_type[sg["type"]] = by_type.get(sg["type"], 0) + 1
+            by_prov[sg.get("prov", "unknown")] = by_prov.get(sg.get("prov", "unknown"), 0) + 1
     return {
         "period": inventory.get("period", {}),
         "sessions": sessions,
@@ -400,6 +479,8 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
             "sessions_recovered": recovered,
             "sessions_outside_period": outside,
             "sessions_timestamp_unknown": unknown_ts,
+            "signals_by_type": dict(sorted(by_type.items())),
+            "signals_by_provenance": dict(sorted(by_prov.items())),
         },
     }
 

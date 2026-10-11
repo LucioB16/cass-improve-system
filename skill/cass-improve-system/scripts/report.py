@@ -52,6 +52,9 @@ def _finding_block(finding: dict) -> list[str]:
     ]
     for item in finding["evidence"]:
         lines.append(f"- `{item['ref']}`: {item['excerpt']}")
+    related = finding.get("related_ids") or []
+    if related:
+        lines.append(f"Related signals (same evidence event): {', '.join(f'`{r}`' for r in related)}")
     lines += [
         "Why it matters: recurrence across sessions suggests a systemic gap "
         "rather than a one-off mistake; verify against the cited sessions before promoting.",
@@ -104,6 +107,10 @@ def render(findings: dict) -> str:
         f"{coverage.get('sessions_outside_period', 0)}",
         f"- sessions without usable timestamps: "
         f"{coverage.get('sessions_timestamp_unknown', 0)}",
+        f"- signals by type: "
+        f"{', '.join(f'{k}={v}' for k, v in coverage.get('signals_by_type', {}).items()) or '?'}",
+        f"- signals by provenance: "
+        f"{', '.join(f'{k}={v}' for k, v in coverage.get('signals_by_provenance', {}).items()) or '?'}",
         "",
         "## Executive summary",
         "",

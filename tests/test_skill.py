@@ -431,9 +431,16 @@ class MultilingualTest(unittest.TestCase):
                      "eso no es lo que te pedí",
                      "te equivocaste de archivo",
                      "no era eso lo que necesitaba",
-                     "acordate de usar el entorno correcto"):
+                     "acordate que hay que usar el entorno correcto"):
             with self.subTest(text=text):
                 self.assertIn("user_correction", self._types("user", text))
+
+    def test_reminder_not_correction(self):
+        # Reminders about future actions are not corrections of prior behavior.
+        for text in ("recordá esto para mañana",
+                     "acordate de usar el entorno la próxima vez"):
+            with self.subTest(text=text):
+                self.assertNotIn("user_correction", self._types("user", text))
 
     def test_spanish_correction_accent_variants(self):
         accented = self._types("user", "Recordá que el deploy es manual")
@@ -565,8 +572,36 @@ class LongSessionTest(unittest.TestCase):
         self.assertEqual(meta["sampling"], "stratified: signal-bearing + user turns first, then head/tail")
         corrections = [s for s in session["signals"] if s["type"] == "user_correction"]
         self.assertTrue(any(s["ref"] == "big#msg190" for s in corrections))
-        retries = [s for s in session["signals"] if s["type"] == "retry_loop"]
-        self.assertTrue(any(s["ref"] == "big#msg192" for s in retries))
+
+    def test_isolated_failure_is_not_a_loop(self):
+        # One assistant failure mention is not retry evidence.
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "big", "agent": "codex",
+                             "workspace": "w", "source_id": "local"}]}
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(self._big_export(), False)):
+            out = normalize_cass.normalize_inventory(inv)
+        retries = [s for s in out["sessions"][0]["signals"]
+                   if s["type"] == "retry_loop"]
+        self.assertFalse(any(s["ref"] == "big#msg192" for s in retries))
+
+    def test_repeated_same_error_synthesizes_retry(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "loop", "agent": "codex",
+                             "workspace": "w", "source_id": "local"}]}
+        messages = [{"role": "assistant", "content": "build failed: auth timeout"} if i % 2
+                    else {"role": "assistant", "content": f"step {i} ok"}
+                    for i in range(8)]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            norm = normalize_cass.normalize_inventory(inv)
+        findings = analyze.analyze(norm)
+        retries = [c for c in findings["candidates"] + findings["watch_list"]
+                   + findings["ignored_single_occurrences"]
+                   if c["signal_type"] == "retry_loop"]
+        # Recurrence is recorded as evidence; single-session promotion still
+        # requires cross-session support per policy.
+        self.assertTrue(retries)
 
     def test_selection_deterministic_and_user_biased(self):
         inv = {"period": {}, "coverage": {},
