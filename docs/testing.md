@@ -6,7 +6,7 @@
 python -m unittest discover -s tests -v
 ```
 
-38 tests, stdlib `unittest` only. Fixtures under `tests/fixtures/` cover
+147 tests, stdlib `unittest` only. Fixtures under `tests/fixtures/` cover
 multiple agents/projects/dates. CASS subprocesses are mocked; the suite
 never touches live session history.
 
@@ -26,7 +26,11 @@ occurrence accounting, honest empty reports, evidence traceability,
 read-only pipeline (no files written), canonical install/link/uninstall
 policy (correct/broken/wrong-target links, identical-vs-divergent physical
 trees, idempotency, uninstall safety, spaces in paths), manifest
-determinism.
+determinism, multilingual correction precision, provenance eligibility,
+injected-system detection, stratified retention, period provenance and
+period-aware promotion, COMPLETE/CAPPED inventory, session retry synthesis
+(incl. mixed-period, numeric ordering, idempotency), template collapse,
+related-ids dedup, UTF-16 input tolerance.
 
 CI (`.github/workflows/ci.yml`, matrix windows/ubuntu/macos) runs the unit
 suite plus an isolated-HOME install → verify → reinstall → uninstall
