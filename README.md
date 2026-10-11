@@ -161,7 +161,7 @@ traceable evidence, or an explicit statement when nothing strong was found.
 | Cline | native Agent Skills, compatibility path to canonical | E2E on Cline 3.0.68 |
 | Freebuff CLI | native global Skill discovery from canonical `.agents` | independent 30-day acceptance (207 sessions, 142 WAL recoveries, 0 skipped) |
 | GitHub Copilot App | native Skill discovery from canonical `.agents` | independent E2E ran the full pipeline |
-| Copilot CLI history | CASS `copilot_cli` sessions as review corpus | decoding implemented and verified on real export shape; live-history E2E pending independent retest |
+| Copilot CLI history | CASS `copilot_cli` sessions as review corpus | native 7d retest 39/39 analyzed (419 error_mention, 153 tool_result, 0 high/0 medium); tool-error precision fix and Chronicle event audit verified live |
 
 Copilot App/CLI session history (`copilot_cli` in CASS) is supported as
 review input: Chronicle `events.jsonl` exports are normalized to

@@ -155,6 +155,35 @@ live completions) or the read-vs-execute nature of the tool.
   22-type control audit, aggregation proving boilerplate never
   promotes while genuine repeated failures stay eligible).
 
+### Metric definitions (read carefully: three different denominators)
+
+Independent summaries have mixed these up; all three are legitimate:
+
+- Per-type content presence (audit census): user.message with text
+  572/589, assistant.message with text 1935/3025, tool results with
+  payload 3288/3327. Raw export-shape facts.
+- Full-scan `interpretable_messages` (normalization metadata sum):
+  5,834 on the 7d corpus — every raw event whose provenance is
+  user/assistant/tool_result AND whose extracted text is non-empty.
+  Counts events, not retained excerpts.
+- Retained messages per role (bounded stratified context, ≤120/session):
+  user 527 (515 non-empty), assistant 365 (301), tool 378 (240),
+  system 1391. Full-scan signals always precede retention, so capping
+  bodies never blinds detection.
+
+### Native Copilot App retest (final, independent)
+
+GitHub Copilot App invoked the installed Skill natively; all five stages
+PASS (Preflight → Inventory → Normalize → Analyze → Report): 39/39
+sessions, 34,442 raw events, zero unknown event types, coverage 38
+partial + 1 full, `error_mention` 419, `tool_result` 153, 0 high,
+0 medium, no false-positive recommendations. The two original
+false-positive IDs from repository-level validation were not directly
+present for re-matching (time-window shift), but the corrected behavior
+is confirmed: same error classes now decode to no signal on successful
+tool output, while structured-failure and strong-shape evidence still
+promotes normally.
+
 ## End-to-end validation (live CASS 0.10.0, Phase 22 corrective build, 30-day corpus)
 
 - Stock 30d review via the reinstalled canonical skill: 207 discovered

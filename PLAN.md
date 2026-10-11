@@ -848,9 +848,17 @@ not pushed, no release.
 - [x] Global Skill refreshed on the second machine with user approval
   (`install-skill.ps1 -Target All -Force`, `verify-install.ps1` exit 0,
   byte-identical to this branch incl. the tool-result fix).
-- [ ] Native Copilot App invocation retest (user runs the prompt below
-  inside GitHub Copilot App and reports the observed result).
+- [x] Native Copilot App invocation retest: INDEPENDENT PASS (user-observed).
+  All five stages passed natively through Agent Skills discovery:
+  39/39 sessions, 34,442 raw events, zero unknown types, coverage 38
+  partial + 1 full, `error_mention` 419, `tool_result` 153, 0 high,
+  0 medium, no false-positive recommendations. The two original
+  false-positive IDs were eliminated at repository level and did not
+  reappear; they were not directly re-matchable in the shifted final
+  window, so native confirmation is behavioral (corrected classes silent,
+  genuine evidence still promoting), not ID-for-ID.
 - [ ] Merge / release decision (requires explicit approval; needs push).
+  Readiness review recommends GO (see Phase 24 close-out).
 
 ---
 
@@ -906,3 +914,25 @@ fix + structured audit, no promotion-threshold changes, no release.
   currently installed Skill predates it).
 - [ ] Independent native Copilot App retest after reinstall.
 - [ ] Merge / release decision (requires explicit approval; needs push).
+
+# Phase 24 close-out — readiness review (unpushed)
+
+- [x] Native retest recorded above (independent PASS, behavioral
+  confirmation; original FP IDs not directly re-matchable in the final
+  window — documented as a limitation, not a gap).
+- [x] Metric reconciliation documented (`docs/testing.md`): 5,834 =
+  full-scan interpretable events; 527/365/378 = retained messages per
+  role; 572/1935/3288 = per-type content presence. No reporting bug
+  found; no code change required.
+- [x] README compatibility matrix updated to the verified outcome,
+  keeping the four-level distinction (App native E2E / history
+  ingestion E2E / standalone CLI untested / VS Code Chat unclaimed).
+- [x] Full suite green (226/226); cumulative diff vs `main` reviewed:
+  Copilot precision + classification + docs only, no unrelated changes,
+  no private data/secrets/paths, no misleading claims.
+- [x] Installed global Skill already matches this branch HEAD (no code
+  changed since its install); no reinstall performed or needed.
+- [x] Recommendation: GO for merge into `main` as the v1.6.0 feature
+  set (Copilot App native integration + tool-error precision +
+  Chronicle audit). Merge/push/PR/tag/release NOT performed —
+  awaiting explicit user approval.
