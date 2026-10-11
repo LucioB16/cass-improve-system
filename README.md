@@ -310,6 +310,8 @@ license/terms; this project is not affiliated with or endorsed by CASS upstream.
 ## Assets
 
 - `assets/cass-improve-system-icon.png` — project icon shown in the header above.
+- `assets/cass-improve-system-social-preview.png` — horizontal banner
+  (1280×640) prepared for link sharing.
 - GitHub has no native "repository icon"; if you want a visual social
-  preview, upload this same image manually under the repository's
-  Settings → General → Social preview.
+  preview, upload `assets/cass-improve-system-social-preview.png` manually
+  under the repository's Settings → General → Social preview.
