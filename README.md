@@ -160,6 +160,15 @@ traceable evidence, or an explicit statement when nothing strong was found.
 | Claude Code | compatibility path to canonical | install-path verification |
 | Cline | native Agent Skills, compatibility path to canonical | E2E on Cline 3.0.68 |
 | Freebuff CLI | native global Skill discovery from canonical `.agents` | independent 30-day acceptance (207 sessions, 142 WAL recoveries, 0 skipped) |
+| GitHub Copilot App | native Skill discovery from canonical `.agents` | independent E2E ran the full pipeline |
+| Copilot CLI history | CASS `copilot_cli` sessions as review corpus | native 7d retest 39/39 analyzed (419 error_mention, 153 tool_result, 0 high/0 medium); tool-error precision fix and Chronicle event audit verified live |
+
+Copilot App/CLI session history (`copilot_cli` in CASS) is supported as
+review input: Chronicle `events.jsonl` exports are normalized to
+user/assistant/tool roles with content-coverage reporting. Standalone
+Copilot CLI invocation was not separately tested (validation ran inside
+Copilot App); VS Code Copilot Chat history is a separate source and is
+not claimed.
 
 Freebuff CLI support means the Freebuff command-line harness; Freebuff
 Desktop global-home-Skill behavior is not claimed. Windows, Linux, and

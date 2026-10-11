@@ -51,7 +51,9 @@ class PeriodTest(unittest.TestCase):
     def test_none_workspace_sorted(self):
         sessions = [{"path": "a", "agent": "codex", "workspace": None},
                     {"path": "b", "agent": None, "workspace": "w"}]
-        with mock.patch.object(collect_sessions, "list_sessions", return_value=sessions):
+        info = {"via": "sessions", "complete": True, "detail": "x"}
+        with mock.patch.object(collect_sessions, "fetch_inventory",
+                               return_value=(sessions, info)):
             inv = collect_sessions.collect("last 24h", None, None, [], [], 10, 30)
         self.assertEqual(inv["coverage"]["sessions_discovered"], 2)
 
@@ -775,18 +777,32 @@ class InventoryCapTest(unittest.TestCase):
     def _collect_with(self, n, limit):
         sessions = [{"path": f"s{i}", "agent": "codex", "workspace": "w"}
                     for i in range(n)]
-        with mock.patch.object(collect_sessions, "list_sessions",
-                               return_value=sessions) as lst:
+
+        def fake(argv, timeout_s=120, machine_flag="--robot"):
+            assert argv[0] == "sessions", argv
+            assert "--agent" not in argv, argv
+            return {"sessions": sessions}
+
+        with mock.patch.object(cass_adapter, "run_cass_json",
+                               side_effect=fake) as m:
             inv = collect_sessions.collect("last 7 days", None, None,
                                            [], [], limit, 30)
-        return inv, lst
+        return inv, m
+
+    def _sessions_argv(self, mock_run):
+        for call in mock_run.call_args_list:
+            argv = call[0][0]
+            if argv and argv[0] == "sessions":
+                return argv
+        raise AssertionError("no sessions call recorded")
 
     def test_below_limit_complete(self):
-        inv, lst = self._collect_with(5, 10)
+        inv, m = self._collect_with(5, 10)
         self.assertEqual(inv["coverage"]["inventory"], "COMPLETE")
         self.assertFalse(inv["coverage"]["limit_reached"])
         self.assertEqual(inv["coverage"]["sessions_discovered"], 5)
-        self.assertEqual(lst.call_args[1]["limit"], 11)  # limit+1 probe
+        argv = self._sessions_argv(m)
+        self.assertEqual(argv[argv.index("--limit") + 1], "11")  # limit+1 probe
 
     def test_exactly_at_limit_complete(self):
         inv, _ = self._collect_with(10, 10)

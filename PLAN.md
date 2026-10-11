@@ -807,3 +807,132 @@ Driven by the real 30-day v1.4.0 retrospective (207 sessions, 3 harnesses,
   (never default unbounded for bounded corpora); numeric original-index
   ordering for source selection (msg100 > msg10 > msg9); per-case
   regression tests; E2E re-validation; no release.
+
+---
+
+# Phase 23 — Copilot App live validation (second machine, unpushed)
+
+The `fix/copilot-app-compatibility` branch (implementation `5905567`,
+docs `ea452a9`) was validated live against real Copilot App history on a
+second Windows PC (Copilot CLI 1.0.94-3, CASS 0.10.0). Not merged,
+not pushed, no release.
+
+- [x] Restore the branch offline from the transfer bundle and verify
+  commits, integrity (`fsck`, `bundle verify`), and clean tree.
+- [x] Deterministic suite green on the second machine (187/187).
+- [x] Real `events.jsonl` vs CASS export vs `normalize_cass` comparison:
+  user/assistant roles and text correct, tool role never user,
+  timestamps/ordering/refs stable, redaction clean, honest `partial`
+  coverage with counts.
+- [x] Filtering: `copilot_cli` UNION inventory (sessions ⊇ timeline here),
+  multi-agent, workspace, combined, time ranges, capped → UNVERIFIED;
+  zero duplicates; no silent omissions.
+- [x] Stock 7d `copilot_cli` retrospective end-to-end (Preflight →
+  Inventory → Normalize → Aggregate → Report), all exit 0: 39/39
+  analyzed, honest no-findings/medium-only report with coverage limits.
+- [x] Genuine defect found live: real tool outputs nest under
+  `data.result={content, detailedContent}` while fixtures only covered
+  flat `output` — all Copilot tool excerpts decoded empty, so
+  `tool_result` signals could never fire. Fixed with a minimal
+  `_text_from_value` dict fallback (`text` → `content` →
+  `detailedContent`); opaque dicts still yield "".
+- [x] Regression tests mirroring the live shape (nested content,
+  detailed-only fallback, opaque-dict negative, tool-error promotes a
+  `tool_result` `error_mention` without `user_correction`).
+- [x] Full suite green after the fix (191/191); live revalidation:
+  tool excerpts 0/254 → 523/659, `tool_result` signals 0 → 609,
+  2 new medium watch-list items (cross-project recurring tool errors,
+  correctly capped); user/assistant decoding unchanged.
+- [x] Docs updated (`docs/testing.md` Copilot sections); no CASS changes;
+  no session files modified; no private content committed.
+- [x] Global Skill refreshed on the second machine with user approval
+  (`install-skill.ps1 -Target All -Force`, `verify-install.ps1` exit 0,
+  byte-identical to this branch incl. the tool-result fix).
+- [x] Native Copilot App invocation retest: INDEPENDENT PASS (user-observed).
+  All five stages passed natively through Agent Skills discovery:
+  39/39 sessions, 34,442 raw events, zero unknown types, coverage 38
+  partial + 1 full, `error_mention` 419, `tool_result` 153, 0 high,
+  0 medium, no false-positive recommendations. The two original
+  false-positive IDs were eliminated at repository level and did not
+  reappear; they were not directly re-matchable in the shifted final
+  window, so native confirmation is behavioral (corrected classes silent,
+  genuine evidence still promoting), not ID-for-ID.
+- [ ] Merge / release decision (requires explicit approval; needs push).
+  Readiness review recommends GO (see Phase 24 close-out).
+
+---
+
+# Phase 24 — Tool-error precision + Chronicle event audit (unpushed)
+
+Follow-up to the native Copilot App E2E (39/39 sessions, 875
+`error_mention`, 2 medium watch findings): both medium findings were
+manually ruled FALSE POSITIVES (boilerplate `$ErrorActionPreference`
+from a successful `view`; research prose "failed to refresh" from a
+successful `view`), and 17,892/34,442 events were `unknown`. Precision
+fix + structured audit, no promotion-threshold changes, no release.
+
+- [x] Baseline reproduced exactly on local CASS data (875/609, same 2
+  watch IDs) before modifying anything; suite green (191/191).
+- [x] Root causes evidenced per finding: tool name (`view`), structured
+  `success: true`, matched keyword (`error` / `failed`), plus the
+  session-level corroboration path that lifted both clusters to medium.
+- [x] Full 7d event census (34,442 events, 35 types): counts, schema
+  shapes, content/tool-info presence; read-only, no bodies committed.
+- [x] Context-aware tool error detection (`tool_status()` tristate from
+  `success` / `shellExecution.exitCode` / `error` objects; strong
+  diagnostic shapes required only for SUCCESSFUL tool output; failed
+  and status-less output keeps broad patterns; structured
+  `error.message` surfaced as evidence; keyword-less failures stay
+  conservatively silent). User/assistant paths untouched.
+- [x] Audited control/telemetry families mapped to `system` and external
+  tool activity to `tool` via exact-type lists (never prefix wildcards);
+  genuinely unknown future types stay `?`; raw-event accounting kept.
+- [x] Report limitation line reworded to cover both partial causes
+  (unrecognized formats AND undecodable turns); no schema change.
+- [x] 35 synthetic regression tests: status tristate, 8 precision
+  negatives (boilerplate/source/README/research/zero-errors/
+  identifiers), 12 recall positives across all status paths,
+  provenance guards, 22-type control audit + accounting, aggregation
+  (boilerplate never promotes, genuine repeated failures stay
+  eligible). No thresholds weakened.
+- [x] Full suite green (226/226), no cross-agent regressions
+  (opencode/codex/antigravity/claude/cline/copilot, provenance,
+  coverage, filtering, redaction, confidence, refs, recovery,
+  COMPLETE/CAPPED/UNVERIFIED).
+- [x] Live revalidation, same 39 sessions: `error_mention` 875 → 419,
+  `tool_result` 609 → 153 (93 structured-failed + 60 strong-shape,
+  zero unexplained); assistant/user signals identical; watch 2 → 0
+  (both FP titles absent everywhere); coverage 38 partial + 1 full,
+  0 none, 0 skipped; unknown roles 17,892 → 0.
+- [x] Docs updated (`references/analysis-rubric.md` error doctrine +
+  control mapping, `docs/testing.md` precision/audit section,
+  `docs/cass-integration.md` tool status contract); README untouched
+  (no user-facing behavior change).
+- [x] Focused local commits on `fix/copilot-app-compatibility`; tree
+  clean; nothing pushed/merged/released.
+- [ ] Global Skill reinstall for THIS change (requires explicit approval;
+  currently installed Skill predates it).
+- [ ] Independent native Copilot App retest after reinstall.
+- [ ] Merge / release decision (requires explicit approval; needs push).
+
+# Phase 24 close-out — readiness review (unpushed)
+
+- [x] Native retest recorded above (independent PASS, behavioral
+  confirmation; original FP IDs not directly re-matchable in the final
+  window — documented as a limitation, not a gap).
+- [x] Metric reconciliation documented (`docs/testing.md`): 5,834 =
+  full-scan interpretable events; 527/365/378 = retained messages per
+  role; 572/1935/3288 = per-type content presence. No reporting bug
+  found; no code change required.
+- [x] README compatibility matrix updated to the verified outcome,
+  keeping the four-level distinction (App native E2E / history
+  ingestion E2E / standalone CLI untested / VS Code Chat unclaimed).
+- [x] Full suite green (226/226); cumulative diff vs `main` reviewed:
+  Copilot precision + classification + docs only, no unrelated changes,
+  no private data/secrets/paths, no misleading claims.
+- [x] Installed global Skill already matches this branch HEAD (no code
+  changed since its install); no reinstall performed or needed.
+- [x] Recommendation: GO for merge into `main` as the v1.6.0 feature
+  set (Copilot App native integration + tool-error precision +
+  Chronicle audit). Merge/push/PR/tag/release NOT performed —
+  awaiting explicit user approval.

@@ -117,6 +117,10 @@ def render(findings: dict) -> str:
         f"{', '.join(f'{k}={v}' for k, v in coverage.get('signals_by_type', {}).items()) or '?'}",
         f"- signals by provenance: "
         f"{', '.join(f'{k}={v}' for k, v in coverage.get('signals_by_provenance', {}).items()) or '?'}",
+        f"- sessions with no interpretable content: "
+        f"{coverage.get('sessions_content_none', 0)}",
+        f"- sessions partially decoded: "
+        f"{coverage.get('sessions_content_partial', 0)}",
         "",
         "## Executive summary",
         "",
@@ -199,6 +203,24 @@ def render(findings: dict) -> str:
                      f"{coverage.get('limit', '?')} — more sessions exist in "
                      f"the period. Re-run with a higher --limit (max 5000) or "
                      f"narrower filters for complete coverage.")
+        lines.append("")
+    if str(coverage.get("inventory", "")).startswith("UNVERIFIED"):
+        lines.append(f"WARNING: {coverage.get('inventory')} — findings cover "
+                     f"only the sessions actually fetched, not necessarily "
+                     f"all matching sessions in the period.")
+        lines.append("")
+    none_count = coverage.get("sessions_content_none", 0)
+    if none_count:
+        lines.append(f"WARNING: {none_count} session(s) exported successfully "
+                     f"but yielded no interpretable messages (unknown formats "
+                     f"or undecodable content). A report with zero findings "
+                     f"does NOT mean those sessions were empty.")
+        lines.append("")
+    partial_count = coverage.get("sessions_content_partial", 0)
+    if partial_count:
+        lines.append(f"- {partial_count} session(s) were only partially decoded; "
+                     f"some events used unrecognized formats or carried "
+                     f"no decodable text (e.g. empty tool-call turns).")
         lines.append("")
     lines.append(f"- skipped/failed sessions: {coverage.get('sessions_skipped', 0)} "
                  "(exports that CASS could not provide; see normalization metadata).")

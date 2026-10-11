@@ -43,6 +43,8 @@ def infer_role(msg: dict) -> str:
     verified live against CASS 0.10.0 exports. Anything else stays `?` —
     roles are never guessed from message text.
     """
+    if not isinstance(msg, dict):
+        return "?"
     raw = msg.get("role", "")
     if isinstance(raw, str) and raw.strip() and raw.strip().lower() not in ("?", "unknown"):
         folded = raw.strip().lower()
@@ -61,6 +63,42 @@ def infer_role(msg: dict) -> str:
                       "AGENT_RESPONSE", "MODEL_RESPONSE"):
         return "assistant"
     if source == "SYSTEM" or mtype in ("SYSTEM_MESSAGE", "CHECKPOINT"):
+        return "system"
+    # GitHub Copilot Chronicle events (verified: CASS `export --format json`
+    # returns these raw, with message payloads nested under `data`).
+    # Dotted lowercase discriminators; matched case-insensitively on the
+    # exact known set only — unknown future event types stay `?`.
+    ctype = str(msg.get("type", "") or "").strip().lower()
+    if ctype in ("user.message", "userpromptsubmitted"):
+        return "user"
+    if ctype in ("assistant.message", "assistantresponse"):
+        return "assistant"
+    if ctype in ("tool.execution_start", "tool.execution_complete",
+                  "external_tool.requested", "external_tool.completed"):
+        return "tool"
+    if ctype in ("system.message", "session.start", "session.model_change",
+                  "session.task_complete", "session.shutdown",
+                  "assistant.turn_start", "assistant.turn_end"):
+        return "system"
+    # Audited non-conversational Chronicle events (exact types only, never
+    # prefix wildcards; schemas verified live over 34,442 events / 39
+    # sessions, Copilot CLI 1.0.94-3 — see docs/testing.md event audit).
+    # Control/telemetry acknowledged as system so honest `unknown` counts
+    # keep meaning "genuinely unrecognized". Text-bearing members
+    # (session.warning `message`, skill definitions, notifications) decode
+    # through the normal content keys with system provenance: visible as
+    # context, never signal-eligible.
+    if ctype in ("hook.start", "hook.end", "session.usage_checkpoint",
+                  "session.permissions_changed", "session.resume",
+                  "session.warning", "session.mode_changed",
+                  "session.mode_notice_delivered", "session.binary_asset",
+                  "session.canvas.recorded", "session.canvas.removed",
+                  "session.compaction_start", "session.compaction_complete",
+                  "session.truncation", "session.remote_steerable_changed",
+                  "skill.invoked", "skill.context_delivered_ref",
+                  "skill.invoked_ref", "subagent.started",
+                  "subagent.completed", "subagent.configured",
+                  "system.notification"):
         return "system"
     return "?"
 
@@ -179,6 +217,7 @@ _PATTERNS: dict[str, dict[str, object]] = {
             r"forget (it|that)",
             r"revert (that|it)",
             r"that's not what i (asked|meant)",
+            r"that is not what i (asked|meant)",
             r"wrong (file|approach|direction)",
         ],
         "es": [
@@ -341,11 +380,172 @@ def _excerpt(text: str) -> str:
     return text
 
 
-def extract_signals(role: str, text: str, ref: str, prov: str | None = None) -> list[dict]:
+MAX_CHARS_PER_EVENT = 4000
+
+
+def _text_from_value(value: object) -> str:
+    """Extract human text from a content-shaped value. Strings pass through;
+    lists join their text parts (e.g. [{"type": "text", "text": "..."}]);
+    dicts try `text`, then Copilot Chronicle `content` / `detailedContent`
+    (verified live: tool.execution_complete carries
+    data.result={content, detailedContent}); anything else yields "" rather
+    than a JSON dump of an opaque envelope."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = [_text_from_value(item) for item in value]
+        return "\n".join(p for p in parts if p.strip())
+    if isinstance(value, dict):
+        for key in ("text", "content", "detailedContent"):
+            text = value.get(key, "")
+            if isinstance(text, str) and text.strip():
+                return text
+        return ""
+    return ""
+
+
+def _error_diagnostic(env: dict) -> str:
+    """Diagnostic text from a structured error object, if present.
+
+    Copilot `tool.execution_complete` may carry `error: {code, message}`.
+    The message is part of the tool's diagnostic output (verified live),
+    so it is surfaced for detection; callers combine it with the primary
+    payload text rather than letting it hide inside the envelope.
+    """
+    err = env.get("error", "")
+    if isinstance(err, dict):
+        for key in ("message", "content", "details"):
+            text = _text_from_value(err.get(key, ""))
+            if isinstance(text, str) and text.strip():
+                return text
+    return ""
+
+
+def _with_error_diagnostic(text: str, env: dict) -> str:
+    err = _error_diagnostic(env)
+    if err and err not in text:
+        return text + "\n" + err
+    return text
+
+
+def extract_text(msg: dict) -> str:
+    """Extract message text from top-level or enveloped content.
+
+    Order: explicit top-level `content` (existing vendors), then Copilot
+    Chronicle `data.content`, then `payload.content` (tolerance matching
+    upstream envelope handling). Tool payloads additionally try
+    result/output/summary keys, plus a structured `error.message`
+    diagnostic (combined, never replacing the primary payload).
+    Returns "" when nothing interpretable
+    exists; callers distinguish that from real content for coverage.
+    Never stringifies whole event envelopes.
+    """
+    if not isinstance(msg, dict):
+        return ""
+    top = msg.get("content", "")
+    if isinstance(top, str) and top.strip():
+        return top[:MAX_CHARS_PER_EVENT]
+    if isinstance(top, (dict, list)):
+        text = _text_from_value(top)
+        if text.strip():
+            return text[:MAX_CHARS_PER_EVENT]
+        if top:
+            # Legacy fallback: top-level structured content with no
+            # recognized text shape is dumped rather than dropped, exactly
+            # as previous versions behaved for existing vendors.
+            return json.dumps(top)[:MAX_CHARS_PER_EVENT]
+        return ""
+    for envelope in ("data", "payload", "metadata"):
+        env = msg.get(envelope, "")
+        if isinstance(env, dict):
+            text = _text_from_value(env.get("content", ""))
+            if text.strip():
+                return _with_error_diagnostic(
+                    text, env)[:MAX_CHARS_PER_EVENT]
+            for key in ("result", "output", "summary", "message"):
+                text = _text_from_value(env.get(key, ""))
+                if text.strip():
+                    return _with_error_diagnostic(
+                        text, env)[:MAX_CHARS_PER_EVENT]
+            err = _error_diagnostic(env)
+            if err.strip():
+                return err[:MAX_CHARS_PER_EVENT]
+    return ""
+
+
+# Strong failure shapes for tool output that a SUCCESSFUL execution
+# returned. Rationale (verified live on Copilot CLI 1.0.94-3): a tool that
+# reports success returned CONTENT, not a failure — `$ErrorActionPreference
+# = "Stop"` in viewed source, `throw new Error(...)`, prose like "it still
+# failed to refresh", or "0 errors" in a passing build are incidental
+# error-vocabulary, not runtime failures. Bare keywords (`error`, `failed`,
+# ...) therefore do NOT qualify here; only structured diagnostic shapes do.
+# Executions WITHOUT a success status (other vendors' plain tool messages,
+# envelopes without status fields) keep the legacy broad patterns so no
+# genuine failure evidence is lost where no status exists to consult.
+_STRONG_TOOL_ERROR = [
+    r"traceback \(most recent call last\)",
+    r"exception in thread",
+    r"uncaught (exception|error)\b",
+    r"\w+(error|exception|failure)\s*:\s*\S",
+    r"exit (code|status)\s*[:=]?\s*[1-9]\d*",
+    r"[1-9]\d* (tests? )?(failed|failing|errors?)\b",
+    r"tests? (failed|failing)\b",
+    r"build (failed|failure|broken)\b",
+    r"permission denied|access (is )?denied\b|EACCES|EPERM",
+    r"ENOENT|no such file|cannot find|can'?t find|file not found",
+    r"timed? ?out (after|in)\b|operation timed out",
+    r"segmentation fault|core dumped",
+]
+_COMPILED_STRONG_TOOL_ERROR = [re.compile(r"\b(?:" + p + r")", re.I)
+                               for p in _STRONG_TOOL_ERROR]
+
+
+def tool_status(msg: dict) -> dict | None:
+    """Structured execution status from a tool event envelope, if present.
+
+    Copilot Chronicle `tool.execution_complete` carries `success:bool`
+    plus optional `shellExecution.exitCode` and an `error` object (verified:
+    3327/3327 live completions carry `success`). Returns None when the
+    envelope carries no status at all (other vendors' plain tool messages),
+    in which case callers keep legacy behavior. Never invents a status.
+    """
+    if not isinstance(msg, dict):
+        return None
+    data = msg.get("data")
+    if not isinstance(data, dict):
+        return None
+    if ("success" not in data and "shellExecution" not in data
+            and "error" not in data):
+        return None
+    success = data.get("success")
+    exit_code: int | None = None
+    shell = data.get("shellExecution")
+    if isinstance(shell, dict):
+        ec = shell.get("exitCode")
+        if isinstance(ec, bool):
+            exit_code = None
+        elif isinstance(ec, (int, float)):
+            exit_code = int(ec)
+    err = data.get("error")
+    has_error = isinstance(err, dict) and bool(err)
+    failed = (success is False) or (
+        exit_code is not None and exit_code != 0) or has_error
+    return {"success": success, "exit_code": exit_code,
+            "has_error": has_error, "failed": failed,
+            "ok": success is True and not failed}
+
+
+def extract_signals(role: str, text: str, ref: str, prov: str | None = None,
+                    tool_status: dict | None = None) -> list[dict]:
     """Heuristic per-message signal detection. All matches are DERIVED.
 
     prov gates eligibility; when omitted it is derived (kept for
-    backward-compatible direct callers in tests).
+    backward-compatible direct callers in tests). `tool_status` carries the
+    structured execution status for tool envelopes (see tool_status());
+    a tool execution that reports SUCCESS only yields `error_mention` on
+    strong diagnostic shapes, never on bare error vocabulary. Failed or
+    status-less tool output keeps the legacy broad patterns.
     """
     is_user = (role == "user")
     if prov is None:
@@ -361,6 +561,9 @@ def extract_signals(role: str, text: str, ref: str, prov: str | None = None) -> 
         patterns = _COMPILED[stype]
         if prov == "user_text" and _USER_PATTERNS.get(stype):
             patterns = _USER_PATTERNS[stype]
+        elif (stype == "error_mention" and prov == "tool_result"
+                and (tool_status or {}).get("ok")):
+            patterns = _COMPILED_STRONG_TOOL_ERROR
         if any(p.search(folded) for p in patterns):
             found.append({"type": stype, "excerpt": _excerpt(raw[:400]),
                           "ref": ref, "prov": prov})
@@ -421,8 +624,11 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
         "metadata": {"truncated": False, "export_failed": False,
                      "recovered_from_panic": False, "sampling": "none",
                      "total_messages": 0, "retained_messages": 0,
-                     "activity_start": None, "activity_end": None,
-                     "timestamps": "none", "out_of_period": False},
+        "activity_start": None, "activity_end": None,
+        "timestamps": "none", "out_of_period": False,
+        "raw_event_count": 0, "interpretable_messages": 0,
+        "unknown_role_count": 0, "missing_content_count": 0,
+        "unsupported_event_count": 0, "content_coverage": "empty"},
     }
     try:
         raw, recovered = export_session(
@@ -431,27 +637,62 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
     except CassError:
         session["metadata"]["export_failed"] = True
         return session
+    session["metadata"]["raw_event_count"] = len(raw)
     raw = [m for m in raw if isinstance(m, dict)]
     total = len(raw)
     session["metadata"]["total_messages"] = total
+    unsupported = 0
+    malformed = session["metadata"]["raw_event_count"] - total
+    if malformed > 0:
+        # Non-object records in the export: uninterpretable by construction.
+        unsupported += malformed
     bound_start = entry.get("_period_start")
     bound_end = entry.get("_period_end")
     # Full scan for signals FIRST so late-session behavior is discoverable;
     # retention below is only about which message bodies are kept.
     scanned: list[tuple[int, str, str, str, str | None]] = []  # (index, role, prov, text, time)
     user_idx: list[int] = []
+    interpretable = 0
+    unknown_roles = 0
+    missing_content = 0
     for i, msg in enumerate(raw):
         role = infer_role(msg)
-        content = msg.get("content", "")
-        text = content if isinstance(content, str) else json.dumps(content)[:4000]
+        text = extract_text(msg)
         prov = derive_provenance(role, text)
         scanned.append((i, role, prov, text, message_time(msg)))
         if role == "user":
             user_idx.append(i)
+        if prov in ("user_text", "assistant_text", "tool_result") and text.strip():
+            interpretable += 1
+        elif prov == "unknown":
+            # Recognized event shape unknown to us, or no role signal at
+            # all: counted honestly instead of silently dropped.
+            unknown_roles += 1
+            unsupported += 1
+        elif prov in ("user_text", "assistant_text") and not text.strip():
+            # A conversational turn with no decodable text.
+            missing_content += 1
+            unsupported += 1
+    session["metadata"]["interpretable_messages"] = interpretable
+    session["metadata"]["unknown_role_count"] = unknown_roles
+    session["metadata"]["missing_content_count"] = missing_content
+    session["metadata"]["unsupported_event_count"] = unsupported
+    if total == 0 or (interpretable == 0 and unknown_roles == 0 and missing_content == 0):
+        # No records at all, or only system/injected/control records:
+        # nothing to interpret, but nothing lost either.
+        session["metadata"]["content_coverage"] = "empty"
+    elif interpretable == 0:
+        session["metadata"]["content_coverage"] = "none"
+    elif unsupported > 0:
+        session["metadata"]["content_coverage"] = "partial"
+    else:
+        session["metadata"]["content_coverage"] = "full"
     ordered_signals: list[dict] = []
     signal_idx: list[int] = []
     for i, role, prov, text, msg_time in scanned:
-        found = extract_signals(role, text, f"{session_id}#msg{i}", prov)
+        status = tool_status(raw[i]) if role == "tool" else None
+        found = extract_signals(role, text, f"{session_id}#msg{i}", prov,
+                                tool_status=status)
         for signal in found:
             signal["period"] = _signal_period(msg_time, bound_start, bound_end)
         if found:
@@ -495,6 +736,14 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
             for call in tools[:20]:
                 name = call.get("name") if isinstance(call, dict) else str(call)
                 session["tool_calls"].append(str(name)[:120])
+        data = raw[i].get("data", "")
+        if isinstance(data, dict):
+            for call in data.get("toolRequests", [])[:20]:
+                if isinstance(call, dict):
+                    for key in ("tool", "name", "toolName"):
+                        if isinstance(call.get(key), str) and call[key].strip():
+                            session["tool_calls"].append(call[key].strip()[:120])
+                            break
     return session
 
 
@@ -532,6 +781,10 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
     recovered = sum(1 for s in ok if s["metadata"].get("recovered_from_panic"))
     outside = sum(1 for s in ok if s["metadata"].get("out_of_period"))
     unknown_ts = sum(1 for s in ok if s["metadata"].get("timestamps") == "none")
+    content_none = sum(1 for s in ok
+                       if s["metadata"].get("content_coverage") == "none")
+    content_partial = sum(1 for s in ok
+                          if s["metadata"].get("content_coverage") == "partial")
     by_type: dict[str, int] = {}
     by_prov: dict[str, int] = {}
     for s in ok:
@@ -549,6 +802,8 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
             "sessions_recovered": recovered,
             "sessions_outside_period": outside,
             "sessions_timestamp_unknown": unknown_ts,
+            "sessions_content_none": content_none,
+            "sessions_content_partial": content_partial,
             "signals_by_type": dict(sorted(by_type.items())),
             "signals_by_provenance": dict(sorted(by_prov.items())),
         },
