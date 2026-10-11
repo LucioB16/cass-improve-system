@@ -130,14 +130,35 @@ def analyze(normalized: dict) -> dict:
                 "agents": set(),
                 "workspaces": set(),
                 "prov_counts": {},
+                "bounded": False,
+                "in_window": 0,
+                "sessions_in": set(),
+                "projects_in": set(),
+                "user_in": 0,
+                "pre_window": 0,
+                "unknown_time": 0,
                 "excerpts": [],
             })
+            period = signal.get("period", "unbounded")
+            in_scope = period in ("in_window", "unbounded")
             bucket["occurrences"] += 1
             bucket["session_ids"].add(sid)
             bucket["agents"].add(str(session.get("agent", "?")))
             bucket["workspaces"].add(str(session.get("workspace", "?")))
             prov = signal.get("prov", "unknown")
             bucket["prov_counts"][prov] = bucket["prov_counts"].get(prov, 0) + 1
+            if period != "unbounded":
+                bucket["bounded"] = True
+            if period == "in_window" or period == "unbounded":
+                bucket["in_window"] += 1
+                bucket["sessions_in"].add(sid)
+                bucket["projects_in"].add(str(session.get("workspace", "?")))
+                if prov == "user_text":
+                    bucket["user_in"] += 1
+            elif period == "pre_window":
+                bucket["pre_window"] += 1
+            else:
+                bucket["unknown_time"] += 1
             if len(bucket["excerpts"]) < 3:
                 bucket["excerpts"].append({
                     "ref": signal.get("ref", sid),
@@ -145,10 +166,19 @@ def analyze(normalized: dict) -> dict:
                 })
     candidates, watch, ignored = [], [], []
     for (stype, fp), bucket in clusters.items():
-        n_sessions = len(bucket["session_ids"])
-        n_projects = len(bucket["workspaces"])
-        has_user = bucket["prov_counts"].get("user_text", 0) > 0
-        conf = confidence(n_sessions, n_projects, bucket["occurrences"], stype, has_user)
+        if bucket["bounded"]:
+            # Real period bounds: only in-window evidence promotes.
+            n_sessions = len(bucket["sessions_in"])
+            n_projects = len(bucket["projects_in"])
+            occ_in = bucket["in_window"]
+        else:
+            # Legacy inputs without period metadata count fully.
+            n_sessions = len(bucket["session_ids"])
+            n_projects = len(bucket["workspaces"])
+            occ_in = bucket["occurrences"]
+        has_user = (bucket["prov_counts"].get("user_text", 0) > 0
+                    and bucket["user_in"] > 0)
+        conf = confidence(n_sessions, n_projects, occ_in, stype, has_user)
         first_words = " ".join(bucket["excerpts"][0]["excerpt"].split()[:8]) \
             if bucket["excerpts"] else ""
         finding = {
@@ -163,6 +193,9 @@ def analyze(normalized: dict) -> dict:
             "confidence": conf,
             "destinations": DESTINATIONS.get(stype, ["EPHEMERAL"]),
             "provenance": dict(sorted(bucket["prov_counts"].items())),
+            "evidence_in_window": bucket["in_window"],
+            "evidence_pre_window": bucket["pre_window"],
+            "evidence_unknown_time": bucket["unknown_time"],
             "related_ids": [],
             "evidence": bucket["excerpts"],
         }

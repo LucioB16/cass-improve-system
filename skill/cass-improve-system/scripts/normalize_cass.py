@@ -71,13 +71,26 @@ def infer_role(msg: dict) -> str:
 _TOOL_ENVELOPES = ("[tool output]", "<tool_result>", "<toolresult>")
 _SYSTEM_ENVELOPES = ("[context]", "<context>", "[system]")
 
-_PROVENANCE = ("user_text", "assistant_text", "tool_result", "system", "unknown")
+# Injected harness directives: a message OPENING with one of these markers
+# is framework text even when the harness presents role=user (verified live:
+# OH-MY-OPENCODE TODO-continuation directives open with "[SYSTEM DIRECTIVE:").
+# Leading-position only: a user merely DISCUSSING directives mid-message
+# stays user-authored. <auto-slash-command> is deliberately NOT here: those
+# blocks wrap the user's own goal text.
+_INJECTED_OPENERS = ("[system directive:", "<!-- omo_internal_")
+
+_PROVENANCE = ("user_text", "assistant_text", "tool_result", "system",
+               "injected_system", "unknown")
 
 
 def derive_provenance(role: str, text: str) -> str:
     """Classify a normalized message into a provenance bucket using only
     structured role info plus structural envelope markers. Never prose."""
-    lowered = (text or "").lstrip()[:40].lower()
+    stripped = (text or "").lstrip()
+    folded_open = _fold(stripped[:40])
+    if role == "user" and folded_open.startswith(_INJECTED_OPENERS):
+        return "injected_system"
+    lowered = stripped[:40].lower()
     if role == "user":
         return "user_text"
     if role == "tool":
@@ -198,6 +211,7 @@ _PATTERNS: dict[str, dict[str, object]] = {
     },
     "error_mention": {
         "user_only": False,
+        # Broad patterns apply to assistant prose and tool diagnostics.
         "en": [
             r"error|failed|failure|traceback|exception|panic|timeout|timed out|"
             r"not found|denied|refused|broken|crash(?:ed|es)?",
@@ -205,6 +219,32 @@ _PATTERNS: dict[str, dict[str, object]] = {
         "es": [
             r"fallo|falla|fallen|fallaron|fallido|excepcion|roto|se rompio|"
             r"denegado|no encontrado|colgo|cuelga|tildo|no responde",
+        ],
+        # Strict occurrence structures for user-authored text: task
+        # descriptions merely mentioning errors ("auditing for FACTUAL
+        # ERRORS") must not fire, while real reports do.
+        "user_en": [
+            r"i (got|get|have|see|saw|hit|ran into) (an? )?error",
+            r"there'?s (an? )?error",
+            r"failed (with|to|on)",
+            r"keeps? failing",
+            r"crash(?:ed|es|ing)?",
+            r"\b(broke|broken)\b",
+            r"doesn'?t work|not working|won'?t (start|run|work|load|open)",
+            r"threw (an? )?(error|exception)",
+            r"error (occurred|when|while|:)",
+            r"build (failed|broken|failing)",
+            r"tests? fail(?:ed|ing|ure)?",
+        ],
+        "user_es": [
+            r"me dio (un )?error",
+            r"dio error",
+            r"hay un error",
+            r"tengo un error",
+            r"\bfallo\b|\bfalla(n)?\b|fallando|fallido",
+            r"se rompio|esta roto|rota",
+            r"no funciona|no anda|no abre|no responde|no carga",
+            r"error (al|de|en|:)",
         ],
     },
     "retry_loop": {
@@ -266,6 +306,13 @@ _COMPILED: dict[str, list] = {
     name: [re.compile(r"\b(?:" + p + r")", re.I) for p in defs["en"] + defs["es"]]  # type: ignore[operator]
     for name, defs in _PATTERNS.items()
 }
+# Strict user-authored occurrence patterns (only for signals that define
+# user_en/user_es). Leading \b keeps the matching contract ("terror" != error).
+_USER_PATTERNS: dict[str, list] = {
+    name: [re.compile(r"\b(?:" + p + r")", re.I) for p in
+           defs.get("user_en", []) + defs.get("user_es", [])]  # type: ignore[operator]
+    for name, defs in _PATTERNS.items()
+}
 _USER_ONLY = {name for name, defs in _PATTERNS.items() if defs["user_only"]}
 
 # Secret-looking patterns -> redaction label.
@@ -306,11 +353,14 @@ def extract_signals(role: str, text: str, ref: str, prov: str | None = None) -> 
     folded = _fold(text or "")
     raw = text or ""
     found = []
-    for stype, patterns in _COMPILED.items():
+    for stype in _COMPILED:
         if stype in _USER_ONLY and not is_user:
             continue
         if prov not in _ELIGIBLE.get(stype, set()):
             continue
+        patterns = _COMPILED[stype]
+        if prov == "user_text" and _USER_PATTERNS.get(stype):
+            patterns = _USER_PATTERNS[stype]
         if any(p.search(folded) for p in patterns):
             found.append({"type": stype, "excerpt": _excerpt(raw[:400]),
                           "ref": ref, "prov": prov})
@@ -384,32 +434,35 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
     raw = [m for m in raw if isinstance(m, dict)]
     total = len(raw)
     session["metadata"]["total_messages"] = total
+    bound_start = entry.get("_period_start")
+    bound_end = entry.get("_period_end")
     # Full scan for signals FIRST so late-session behavior is discoverable;
     # retention below is only about which message bodies are kept.
-    scanned: list[tuple[int, str, str, str]] = []  # (index, role, prov, text)
+    scanned: list[tuple[int, str, str, str, str | None]] = []  # (index, role, prov, text, time)
     user_idx: list[int] = []
     for i, msg in enumerate(raw):
         role = infer_role(msg)
         content = msg.get("content", "")
         text = content if isinstance(content, str) else json.dumps(content)[:4000]
         prov = derive_provenance(role, text)
-        scanned.append((i, role, prov, text))
+        scanned.append((i, role, prov, text, message_time(msg)))
         if role == "user":
             user_idx.append(i)
     ordered_signals: list[dict] = []
     signal_idx: list[int] = []
-    for i, role, prov, text in scanned:
+    for i, role, prov, text, msg_time in scanned:
         found = extract_signals(role, text, f"{session_id}#msg{i}", prov)
+        for signal in found:
+            signal["period"] = _signal_period(msg_time, bound_start, bound_end)
         if found:
             ordered_signals.append((i, found))
             signal_idx.append(i)
     session["signals"] = [s for _, group in ordered_signals for s in group]
     # Activity range from message timestamps, else inventory fields.
     stamps = []
-    for i, _, _, _ in scanned:
-        parsed = message_time(raw[i])
-        if parsed:
-            stamps.append(parsed)
+    for i, _, _, _, msg_time in scanned:
+        if msg_time:
+            stamps.append(msg_time)
     if stamps:
         session["metadata"]["activity_start"] = min(stamps)
         session["metadata"]["activity_end"] = max(stamps)
@@ -433,7 +486,7 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
         session["metadata"]["sampling"] = (
             "stratified: signal-bearing + user turns first, then head/tail")
     session["metadata"]["retained_messages"] = len(keep)
-    by_index = {i: (role, text) for i, role, _, text in scanned}
+    by_index = {i: (role, text) for i, role, _, text, _ in scanned}
     for i in keep:
         role, text = by_index[i]
         session["messages"].append({"role": role, "excerpt": _excerpt(text)})
@@ -443,6 +496,23 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
                 name = call.get("name") if isinstance(call, dict) else str(call)
                 session["tool_calls"].append(str(name)[:120])
     return session
+
+
+def _signal_period(msg_time: str | None, bound_start: str | None,
+                   bound_end: str | None) -> str:
+    """Period provenance of one signal from its source message timestamp.
+
+    in_window | pre_window | post_window | unknown (message time missing
+    while bounds exist) | unbounded (no requested bounds at all: legacy
+    inputs count toward promotion, honestly labeled).
+    """
+    if msg_time is None:
+        return "unknown" if (bound_start or bound_end) else "unbounded"
+    if bound_start and msg_time < bound_start:
+        return "pre_window"
+    if bound_end and msg_time > bound_end:
+        return "post_window"
+    return "in_window"
 
 
 def _outside_period(start: str | None, end: str | None,

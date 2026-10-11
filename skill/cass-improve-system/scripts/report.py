@@ -48,6 +48,9 @@ def _finding_block(finding: dict) -> list[str]:
         f"{finding['session_count']} session(s), {finding['project_count']} project(s); "
         f"agents: {', '.join(finding['agents'])}; "
         f"cross-project: {'yes' if finding['cross_project'] else 'no'}",
+        f"In-window evidence: {finding.get('evidence_in_window', '?')}; "
+        f"pre-window: {finding.get('evidence_pre_window', '?')}; "
+        f"unknown-time: {finding.get('evidence_unknown_time', '?')}",
         "Representative evidence:",
     ]
     for item in finding["evidence"]:
@@ -101,6 +104,9 @@ def render(findings: dict) -> str:
         f"- sessions discovered: {coverage.get('sessions_discovered', '?')}",
         f"- sessions analyzed: {coverage.get('sessions_analyzed', '?')}",
         f"- sessions skipped/failed: {coverage.get('sessions_skipped', '?')}",
+        f"- inventory coverage: {coverage.get('inventory', '?')} "
+        f"(returned {coverage.get('sessions_returned', '?')} of limit "
+        f"{coverage.get('limit', '?')})",
         f"- agents: {', '.join(coverage.get('agents', [])) or '?'}",
         f"- projects/workspaces: {len(coverage.get('workspaces', []))} distinct",
         f"- sessions outside requested period (kept, flagged): "
@@ -188,6 +194,12 @@ def render(findings: dict) -> str:
         lines.append("")
     lines.append("## Coverage limitations")
     lines.append("")
+    if coverage.get("limit_reached"):
+        lines.append(f"WARNING: session inventory was CAPPED at limit "
+                     f"{coverage.get('limit', '?')} — more sessions exist in "
+                     f"the period. Re-run with a higher --limit (max 5000) or "
+                     f"narrower filters for complete coverage.")
+        lines.append("")
     lines.append(f"- skipped/failed sessions: {coverage.get('sessions_skipped', 0)} "
                  "(exports that CASS could not provide; see normalization metadata).")
     recovered = coverage.get("sessions_recovered", 0)

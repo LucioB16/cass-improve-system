@@ -720,6 +720,186 @@ class DedupTest(unittest.TestCase):
         self.assertIn("Destinations: AUTOMATION, NEW SKILL", text)
 
 
+class InjectedDirectiveTest(unittest.TestCase):
+    DIRECTIVE = ("[SYSTEM DIRECTIVE: OH-MY-OPENCODE - TODO CONTINUATION]\n\n"
+                 "Incomplete tasks remain in your todo list. Continue working "
+                 "on the next pending task.\n\n- Proceed without asking for "
+                 "permission\n- Mark each task complete when finished\n\n"
+                 "[Status: 5/6 completed, 1 remaining]\n\nRemaining tasks:\n"
+                 "- [in_progress] Sinesis: redactar entrega y frenar")
+
+    def test_directive_opener_not_user_text(self):
+        self.assertEqual(
+            normalize_cass.derive_provenance("user", self.DIRECTIVE),
+            "injected_system")
+        self.assertEqual(
+            normalize_cass.derive_provenance(
+                "user", "   <!-- OMO_INTERNAL_HOOK -->\ndo stuff"),
+            "injected_system")
+
+    def test_directive_emits_no_user_signals(self):
+        sigs = normalize_cass.extract_signals(
+            "user", self.DIRECTIVE, "s#0", "injected_system")
+        self.assertEqual(sigs, [])
+
+    def test_directive_never_user_backed_finding(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": f"d{i}", "agent": "codex", "workspace": "w",
+                             "source_id": "local"} for i in range(3)]}
+        messages = [{"role": "user", "content": self.DIRECTIVE}]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            norm = normalize_cass.normalize_inventory(inv)
+        findings = analyze.analyze(norm)
+        for group in (findings["candidates"], findings["watch_list"]):
+            for finding in group:
+                self.assertEqual(finding["provenance"].get("user_text", 0), 0)
+
+    def test_user_discussing_directive_stays_user(self):
+        text = ("estuve leyendo sobre system directive en la documentación, "
+                "qué opinás de ese patrón?")
+        self.assertEqual(normalize_cass.derive_provenance("user", text),
+                         "user_text")
+
+    def test_user_context_block_stays_user(self):
+        text = "[CONTEXT]\nRecordá que este proyecto ya tiene linter."
+        self.assertEqual(normalize_cass.derive_provenance("user", text),
+                         "user_text")
+
+    def test_native_system_still_system(self):
+        self.assertEqual(normalize_cass.derive_provenance("system", "do x"),
+                         "system")
+
+
+class InventoryCapTest(unittest.TestCase):
+    def _collect_with(self, n, limit):
+        sessions = [{"path": f"s{i}", "agent": "codex", "workspace": "w"}
+                    for i in range(n)]
+        with mock.patch.object(collect_sessions, "list_sessions",
+                               return_value=sessions) as lst:
+            inv = collect_sessions.collect("last 7 days", None, None,
+                                           [], [], limit, 30)
+        return inv, lst
+
+    def test_below_limit_complete(self):
+        inv, lst = self._collect_with(5, 10)
+        self.assertEqual(inv["coverage"]["inventory"], "COMPLETE")
+        self.assertFalse(inv["coverage"]["limit_reached"])
+        self.assertEqual(inv["coverage"]["sessions_discovered"], 5)
+        self.assertEqual(lst.call_args[1]["limit"], 11)  # limit+1 probe
+
+    def test_exactly_at_limit_complete(self):
+        inv, _ = self._collect_with(10, 10)
+        self.assertEqual(inv["coverage"]["inventory"], "COMPLETE")
+        self.assertEqual(len(inv["sessions"]), 10)
+
+    def test_above_limit_capped(self):
+        inv, _ = self._collect_with(13, 10)
+        self.assertTrue(inv["coverage"]["limit_reached"])
+        self.assertIn("CAPPED", inv["coverage"]["inventory"])
+        self.assertEqual(len(inv["sessions"]), 10)
+
+    def test_explicit_custom_limit(self):
+        inv, _ = self._collect_with(3, 2)
+        self.assertTrue(inv["coverage"]["limit_reached"])
+        self.assertEqual(inv["coverage"]["limit"], 2)
+
+    def test_absurd_limit_rejected(self):
+        with self.assertRaises(ValueError):
+            collect_sessions.collect("last 7 days", None, None, [], [], 99999, 30)
+
+    def test_capped_warning_in_report(self):
+        findings = {"period": {"label": "t"},
+                    "coverage": {"sessions_discovered": 10, "sessions_analyzed": 10,
+                                 "sessions_skipped": 0, "limit": 10,
+                                 "limit_reached": True, "agents": [], "workspaces": []},
+                    "candidates": [], "watch_list": [],
+                    "ignored_single_occurrences": []}
+        text = report.render(findings)
+        self.assertIn("CAPPED", text)
+
+
+class SignalPeriodTest(unittest.TestCase):
+    BOUNDS = ("2026-09-11T00:00:00+00:00", "2026-10-11T23:59:59+00:00")
+
+    def _inv(self, messages):
+        return {"period": {}, "coverage": {},
+                "sessions": [{"path": "s", "agent": "codex", "workspace": "w",
+                              "source_id": "local",
+                              "_period_start": self.BOUNDS[0],
+                              "_period_end": self.BOUNDS[1]}]}, messages
+
+    def test_in_window_pre_window_unknown_labels(self):
+        inv, messages = self._inv([
+            {"role": "user", "content": "falló otra vez",
+             "created_at": "2026-10-01T10:00:00Z"},
+            {"role": "user", "content": "falló otra vez",
+             "created_at": "2026-08-01T10:00:00Z"},
+            {"role": "user", "content": "falló otra vez"},
+        ])
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            out = normalize_cass.normalize_inventory(inv)
+        periods = sorted(s.get("period", "?") for s in out["sessions"][0]["signals"])
+        self.assertIn("in_window", periods)
+        self.assertIn("pre_window", periods)
+        self.assertIn("unknown", periods)
+
+    def test_pre_window_only_cannot_promote(self):
+        inv = {"period": {}, "coverage": {}, "sessions": []}
+        for i in range(3):
+            inv["sessions"].append(
+                {"path": f"s{i}", "agent": "codex", "workspace": f"p{i}",
+                 "source_id": "local",
+                 "_period_start": self.BOUNDS[0], "_period_end": self.BOUNDS[1]})
+        messages = [{"role": "user", "content": "no, eso no es lo que te pedí",
+                     "created_at": "2026-08-10T10:00:00Z"}]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            norm = normalize_cass.normalize_inventory(inv)
+        findings = analyze.analyze(norm)
+        promoted = findings["candidates"] + findings["watch_list"]
+        self.assertFalse([f for f in promoted
+                          if f["signal_type"] == "user_correction"])
+
+    def test_in_window_corroboration_promotes(self):
+        inv = {"period": {}, "coverage": {}, "sessions": []}
+        stamps = {"old": "2026-08-10T10:00:00Z",
+                  "new1": "2026-10-02T10:00:00Z",
+                  "new2": "2026-10-03T10:00:00Z"}
+        for i, (sid, workspace) in enumerate(
+                [("old", "p-old"), ("new1", "p-new1"), ("new2", "p-new2")]):
+            inv["sessions"].append(
+                {"path": sid, "agent": "codex", "workspace": workspace,
+                 "source_id": "local",
+                 "_period_start": self.BOUNDS[0], "_period_end": self.BOUNDS[1]})
+
+        def fake_export(path, source_id="local", timeout_s=120, retries=3):
+            return ([{"role": "user",
+                      "content": "no, eso no es lo que te pedí",
+                      "created_at": stamps[path]}], False)
+
+        with mock.patch.object(normalize_cass, "export_session",
+                               side_effect=fake_export):
+            norm = normalize_cass.normalize_inventory(inv)
+        findings = analyze.analyze(norm)
+        corrections = [f for f in findings["candidates"] + findings["watch_list"]
+                       if f["signal_type"] == "user_correction"]
+        self.assertTrue(corrections)
+        self.assertTrue(any(f["evidence_pre_window"] > 0 for f in corrections))
+
+    def test_evidence_refs_stay_original(self):
+        inv, messages = self._inv([
+            {"role": "user", "content": "hola",
+             "created_at": "2026-10-01T10:00:00Z"},
+        ])
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            out = normalize_cass.normalize_inventory(inv)
+        for signal in out["sessions"][0]["signals"]:
+            self.assertRegex(signal["ref"], r"#msg\d+$")
+
+
 class ReadOnlyTest(unittest.TestCase):
     def test_pipeline_writes_no_files(self):
         before = set(os.listdir(BASE))

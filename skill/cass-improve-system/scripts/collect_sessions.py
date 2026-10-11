@@ -61,6 +61,10 @@ def resolve_bound(value: str | None, is_end: bool, now: datetime | None = None) 
         return None
 
 
+DEFAULT_LIMIT = 1000  # CASS-verified to return 200+ sessions in one call
+MAX_LIMIT = 5000  # beyond this, narrow by agent/workspace instead
+
+
 def collect(
     period_text: str | None,
     since: str | None,
@@ -74,14 +78,24 @@ def collect(
         since, until, label = parse_period(period_text)
     else:
         label = f"since {since}" + (f" until {until}" if until else "")
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+    if limit > MAX_LIMIT:
+        raise ValueError(
+            f"limit {limit} exceeds the {MAX_LIMIT} safety ceiling; "
+            "narrow with --agent/--workspace instead")
     # NOTE: `cass sessions` supports --since but not --until on all versions;
     # until is applied as a client-side filter below when present.
+    # Fetch limit+1 to detect truncation exactly (a corpus of exactly
+    # `limit` sessions is otherwise indistinguishable from a capped one).
     sessions = list_sessions(
-        since=since, limit=limit, agent=agents or None,
+        since=since, limit=limit + 1, agent=agents or None,
         workspace=workspaces or None, timeout_s=timeout_s,
     )
     if until:
         sessions = [s for s in sessions if _session_on_or_before(s, until)]
+    limit_reached = len(sessions) > limit
+    sessions = sessions[:limit]
     bound_start = resolve_bound(since, is_end=False)
     bound_end = resolve_bound(until, is_end=True) or _utcnow().isoformat()
     for s in sessions:
@@ -95,6 +109,12 @@ def collect(
         "sessions": sessions,
         "coverage": {
             "sessions_discovered": len(sessions),
+            "sessions_returned": len(sessions),
+            "limit": limit,
+            "limit_reached": limit_reached,
+            "inventory": "CAPPED — more sessions exist; re-run with a higher "
+                         "--limit (max 5000) or narrower filters" if limit_reached
+                         else "COMPLETE",
             "agents": agents_seen,
             "workspaces": workspaces_seen,
         },
@@ -114,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--until", default=None)
     parser.add_argument("--agent", action="append", default=[])
     parser.add_argument("--workspace", action="append", default=[])
-    parser.add_argument("--limit", type=int, default=200)
+    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--timeout", type=int, default=120)
     args = parser.parse_args(argv)
     try:

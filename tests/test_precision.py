@@ -165,6 +165,30 @@ class RetrySemanticsTest(unittest.TestCase):
         self.assertTrue(finding_types(findings).get("retry_loop", []))
 
 
+class ErrorContextTest(unittest.TestCase):
+    def test_task_text_mentioning_errors_suppressed(self):
+        for text in ("auditing a documentation repository for FACTUAL ERRORS",
+                     "review the error handling section of the docs"):
+            with self.subTest(text=text):
+                findings, _ = run_pipeline([("s1", "p", [("user", text)])])
+                self.assertFalse(finding_types(findings).get("error_mention", []))
+
+    def test_genuine_user_error_reports_detected(self):
+        for text in ("me dio un error al guardar",
+                     "hay un error en el login",
+                     "I got an error when saving",
+                     "the build failed with timeout"):
+            with self.subTest(text=text):
+                findings, _ = run_pipeline([("s1", "p", [("user", text)])])
+                self.assertTrue(finding_types(findings).get("error_mention", []))
+
+    def test_tool_failure_still_detected(self):
+        findings, _ = run_pipeline([("s1", "p", [
+            ("assistant", "[Tool Output]\nFAILED: auth_test.go:42 timeout"),
+        ])])
+        self.assertTrue(finding_types(findings).get("error_mention", []))
+
+
 class SpanishPairsTest(unittest.TestCase):
     POSITIVES = {
         "user_correction": [
