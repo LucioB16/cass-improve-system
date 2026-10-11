@@ -845,6 +845,9 @@ not pushed, no release.
   correctly capped); user/assistant decoding unchanged.
 - [x] Docs updated (`docs/testing.md` Copilot sections); no CASS changes;
   no session files modified; no private content committed.
-- [ ] Native Copilot App invocation retest (pending user approval to
-  refresh the global Skill first).
+- [x] Global Skill refreshed on the second machine with user approval
+  (`install-skill.ps1 -Target All -Force`, `verify-install.ps1` exit 0,
+  byte-identical to this branch incl. the tool-result fix).
+- [ ] Native Copilot App invocation retest (user runs the prompt below
+  inside GitHub Copilot App and reports the observed result).
 - [ ] Merge / release decision (requires explicit approval; needs push).
