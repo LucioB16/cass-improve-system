@@ -873,6 +873,98 @@ class ToolErrorRecallTest(unittest.TestCase):
         self.assertTrue(errors)
 
 
+class CopilotControlEventsTest(unittest.TestCase):
+    CONTROL_TYPES = [
+        "hook.start", "hook.end", "session.usage_checkpoint",
+        "session.permissions_changed", "session.resume", "session.warning",
+        "session.mode_changed", "session.mode_notice_delivered",
+        "session.binary_asset", "session.canvas.recorded",
+        "session.canvas.removed", "session.compaction_start",
+        "session.compaction_complete", "session.truncation",
+        "session.remote_steerable_changed", "skill.invoked",
+        "skill.context_delivered_ref", "skill.invoked_ref",
+        "subagent.started", "subagent.completed", "subagent.configured",
+        "system.notification",
+    ]
+
+    def test_control_events_map_to_system(self):
+        for etype in self.CONTROL_TYPES:
+            with self.subTest(etype=etype):
+                self.assertEqual(
+                    normalize_cass.infer_role({"type": etype, "data": {}}),
+                    "system")
+
+    def test_external_tool_events_map_to_tool(self):
+        for etype in ("external_tool.requested", "external_tool.completed"):
+            with self.subTest(etype=etype):
+                self.assertEqual(
+                    normalize_cass.infer_role({"type": etype, "data": {}}),
+                    "tool")
+
+    def test_future_unknown_stays_unknown(self):
+        self.assertEqual(normalize_cass.infer_role(
+            {"type": "session.future_kind", "data": {}}), "?")
+        self.assertEqual(normalize_cass.infer_role(
+            {"type": "hook.custom_future", "data": {}}), "?")
+
+    def test_warning_message_decodes_as_system(self):
+        entry, messages = copilot_session(events=[
+            {"type": "session.warning",
+             "data": {"message": "context window nearly full",
+                      "warningType": "tokens"},
+             "timestamp": "2026-10-10T10:01:00.000Z"},
+        ])
+        findings, norm = run_pipeline([(entry, messages)])
+        session = norm["sessions"][0]
+        roles = [m["role"] for m in session["messages"]]
+        self.assertIn("system", roles)
+        self.assertNotIn("user", roles)
+        self.assertNotIn("assistant", roles)
+        self.assertEqual(finding_types(findings), {})
+
+    def test_control_only_session_is_empty(self):
+        entry, messages = copilot_session(events=[
+            {"type": "session.start", "data": {"sessionId": "u"},
+             "timestamp": "2026-10-10T10:00:00.000Z"},
+            {"type": "hook.start",
+             "data": {"hookInvocationId": "h", "hookType": "t"},
+             "timestamp": "2026-10-10T10:00:01.000Z"},
+            {"type": "hook.end",
+             "data": {"hookInvocationId": "h", "hookType": "t",
+                      "success": True},
+             "timestamp": "2026-10-10T10:00:02.000Z"},
+            {"type": "session.usage_checkpoint",
+             "data": {"totalNanoAiu": 5},
+             "timestamp": "2026-10-10T10:00:03.000Z"},
+            {"type": "session.shutdown", "data": {"reason": "done"},
+             "timestamp": "2026-10-10T10:03:00.000Z"},
+        ])
+        findings, norm = run_pipeline([(entry, messages)])
+        meta = norm["sessions"][0]["metadata"]
+        self.assertEqual(meta["content_coverage"], "empty")
+        self.assertEqual(meta["unknown_role_count"], 0)
+        self.assertEqual(meta["raw_event_count"], 5)
+        self.assertEqual(finding_types(findings), {})
+
+    def test_mixed_session_accounting(self):
+        entry, messages = copilot_session(events=[
+            {"type": "hook.start",
+             "data": {"hookInvocationId": "h", "hookType": "t"},
+             "timestamp": "2026-10-10T10:00:01.000Z"},
+            {"type": "copilot.future_kind",
+             "data": {"content": "mystery"},
+             "timestamp": "2026-10-10T10:01:05.000Z"},
+            {"type": "user.message",
+             "data": {"content": "hello there"},
+             "timestamp": "2026-10-10T10:01:00.000Z"},
+        ])
+        _, norm = run_pipeline([(entry, messages)])
+        meta = norm["sessions"][0]["metadata"]
+        self.assertEqual(meta["raw_event_count"], 3)
+        self.assertEqual(meta["unknown_role_count"], 1)
+        self.assertEqual(meta["content_coverage"], "partial")
+
+
 class CopilotPrecisionAggregationTest(unittest.TestCase):
     def _sessions(self, tool_text, success, n=3):
         defs = []

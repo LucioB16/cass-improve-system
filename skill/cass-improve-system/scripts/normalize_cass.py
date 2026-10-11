@@ -73,11 +73,32 @@ def infer_role(msg: dict) -> str:
         return "user"
     if ctype in ("assistant.message", "assistantresponse"):
         return "assistant"
-    if ctype in ("tool.execution_start", "tool.execution_complete"):
+    if ctype in ("tool.execution_start", "tool.execution_complete",
+                  "external_tool.requested", "external_tool.completed"):
         return "tool"
     if ctype in ("system.message", "session.start", "session.model_change",
-                 "session.task_complete", "session.shutdown",
-                 "assistant.turn_start", "assistant.turn_end"):
+                  "session.task_complete", "session.shutdown",
+                  "assistant.turn_start", "assistant.turn_end"):
+        return "system"
+    # Audited non-conversational Chronicle events (exact types only, never
+    # prefix wildcards; schemas verified live over 34,442 events / 39
+    # sessions, Copilot CLI 1.0.94-3 — see docs/testing.md event audit).
+    # Control/telemetry acknowledged as system so honest `unknown` counts
+    # keep meaning "genuinely unrecognized". Text-bearing members
+    # (session.warning `message`, skill definitions, notifications) decode
+    # through the normal content keys with system provenance: visible as
+    # context, never signal-eligible.
+    if ctype in ("hook.start", "hook.end", "session.usage_checkpoint",
+                  "session.permissions_changed", "session.resume",
+                  "session.warning", "session.mode_changed",
+                  "session.mode_notice_delivered", "session.binary_asset",
+                  "session.canvas.recorded", "session.canvas.removed",
+                  "session.compaction_start", "session.compaction_complete",
+                  "session.truncation", "session.remote_steerable_changed",
+                  "skill.invoked", "skill.context_delivered_ref",
+                  "skill.invoked_ref", "subagent.started",
+                  "subagent.completed", "subagent.configured",
+                  "system.notification"):
         return "system"
     return "?"
 
@@ -454,7 +475,7 @@ def extract_text(msg: dict) -> str:
 
 # Strong failure shapes for tool output that a SUCCESSFUL execution
 # returned. Rationale (verified live on Copilot CLI 1.0.94-3): a tool that
-# reports success returned CONTENT, not a failure â€” `$ErrorActionPreference
+# reports success returned CONTENT, not a failure — `$ErrorActionPreference
 # = "Stop"` in viewed source, `throw new Error(...)`, prose like "it still
 # failed to refresh", or "0 errors" in a passing build are incidental
 # error-vocabulary, not runtime failures. Bare keywords (`error`, `failed`,
