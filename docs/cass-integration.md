@@ -82,6 +82,15 @@ cass index --full --json --no-progress-events
   synthetic `events.jsonl`. This is legitimate per-connector export output
   (same as Antigravity transcripts), so the adapter normalizes it
   downstream; no upstream change is implied.
+- Copilot `tool.execution_complete` envelopes carry structured execution
+  status: `success:bool` (present on 3327/3327 live completions),
+  optional `shellExecution.exitCode`, `result:{content, detailedContent}`,
+  `fileEdits`/`shellExecution` detail, and an `error:{code, message}`
+  object on failures (39 observed); `tool.execution_start` carries
+  `toolName` (top: powershell, view, apply_patch, edit, rg, create…).
+  The normalizer consults this status for error-signal precision
+  (see `references/analysis-rubric.md`) but never invents a status where
+  the envelope has none.
 - `cass view <path> --message-index <line_number> --json` — expand a single
   search hit from the archive without exporting the whole session.
 - `cass health --json` / `cass status --json` — readiness; `initialized`,

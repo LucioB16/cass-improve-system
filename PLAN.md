@@ -851,3 +851,58 @@ not pushed, no release.
 - [ ] Native Copilot App invocation retest (user runs the prompt below
   inside GitHub Copilot App and reports the observed result).
 - [ ] Merge / release decision (requires explicit approval; needs push).
+
+---
+
+# Phase 24 — Tool-error precision + Chronicle event audit (unpushed)
+
+Follow-up to the native Copilot App E2E (39/39 sessions, 875
+`error_mention`, 2 medium watch findings): both medium findings were
+manually ruled FALSE POSITIVES (boilerplate `$ErrorActionPreference`
+from a successful `view`; research prose "failed to refresh" from a
+successful `view`), and 17,892/34,442 events were `unknown`. Precision
+fix + structured audit, no promotion-threshold changes, no release.
+
+- [x] Baseline reproduced exactly on local CASS data (875/609, same 2
+  watch IDs) before modifying anything; suite green (191/191).
+- [x] Root causes evidenced per finding: tool name (`view`), structured
+  `success: true`, matched keyword (`error` / `failed`), plus the
+  session-level corroboration path that lifted both clusters to medium.
+- [x] Full 7d event census (34,442 events, 35 types): counts, schema
+  shapes, content/tool-info presence; read-only, no bodies committed.
+- [x] Context-aware tool error detection (`tool_status()` tristate from
+  `success` / `shellExecution.exitCode` / `error` objects; strong
+  diagnostic shapes required only for SUCCESSFUL tool output; failed
+  and status-less output keeps broad patterns; structured
+  `error.message` surfaced as evidence; keyword-less failures stay
+  conservatively silent). User/assistant paths untouched.
+- [x] Audited control/telemetry families mapped to `system` and external
+  tool activity to `tool` via exact-type lists (never prefix wildcards);
+  genuinely unknown future types stay `?`; raw-event accounting kept.
+- [x] Report limitation line reworded to cover both partial causes
+  (unrecognized formats AND undecodable turns); no schema change.
+- [x] 35 synthetic regression tests: status tristate, 8 precision
+  negatives (boilerplate/source/README/research/zero-errors/
+  identifiers), 12 recall positives across all status paths,
+  provenance guards, 22-type control audit + accounting, aggregation
+  (boilerplate never promotes, genuine repeated failures stay
+  eligible). No thresholds weakened.
+- [x] Full suite green (226/226), no cross-agent regressions
+  (opencode/codex/antigravity/claude/cline/copilot, provenance,
+  coverage, filtering, redaction, confidence, refs, recovery,
+  COMPLETE/CAPPED/UNVERIFIED).
+- [x] Live revalidation, same 39 sessions: `error_mention` 875 → 419,
+  `tool_result` 609 → 153 (93 structured-failed + 60 strong-shape,
+  zero unexplained); assistant/user signals identical; watch 2 → 0
+  (both FP titles absent everywhere); coverage 38 partial + 1 full,
+  0 none, 0 skipped; unknown roles 17,892 → 0.
+- [x] Docs updated (`references/analysis-rubric.md` error doctrine +
+  control mapping, `docs/testing.md` precision/audit section,
+  `docs/cass-integration.md` tool status contract); README untouched
+  (no user-facing behavior change).
+- [x] Focused local commits on `fix/copilot-app-compatibility`; tree
+  clean; nothing pushed/merged/released.
+- [ ] Global Skill reinstall for THIS change (requires explicit approval;
+  currently installed Skill predates it).
+- [ ] Independent native Copilot App retest after reinstall.
+- [ ] Merge / release decision (requires explicit approval; needs push).

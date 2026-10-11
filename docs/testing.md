@@ -108,6 +108,53 @@ Environment: Windows 11, Copilot CLI 1.0.94-3, CASS 0.10.0 healthy
   explicit coverage limitation — a no-findings report never masquerades
   as a verified-empty corpus.
 
+## Tool-error precision + event audit (same machine, 2026-10-11)
+
+Both medium findings above were manually inspected and ruled FALSE
+POSITIVES: (A) PowerShell source (`$ErrorActionPreference = "Stop"`)
+returned by a successful `view` tool call matched bare `error`;
+(B) research prose ("…still failed to refresh…") returned by a
+successful `view` matched bare `failed`. Root cause: `error_mention`
+fired on bare keywords in `tool_result` text with no regard for the
+structured execution status (`success: true`, present on 3327/3327
+live completions) or the read-vs-execute nature of the tool.
+
+- Fix: `tool_status()` tristate (`ok` / `failed` / unknown) from
+  `success`, `shellExecution.exitCode`, and `error` objects.
+  Successful tool output needs a strong diagnostic shape (traceback
+  header, `XxxError:`/`Exception:` line, nonzero-exit mention, counted
+  test failures, build failure, permission/file-not-found, timeout,
+  segfault); failed or status-less tool output keeps broad patterns.
+  Structured `error.message` is surfaced as evidence; failures with no
+  textual anchor stay conservatively silent (documented limitation).
+  User/assistant paths and promotion thresholds unchanged.
+- Same-corpus before/after (39 sessions, 34,442 events): `error_mention`
+  875 → 419; `tool_result` signals 609 → 153 (93 structured-failed +
+  60 success-with-strong-shape: 22 exception lines, 18 exit-code
+  mentions, 10 counted failures, 8 file-not-found, 1 build, 1 denied;
+  zero unexplained); assistant/user signals byte-identical (290/30);
+  watch findings 2 → 0 (both FP titles absent from all groups);
+  0 high; coverage 38 partial + 1 full, 0 none, 0 skipped.
+- Event census (exact types, % of 34,442): hook.start/end 48.5%,
+  tool start/complete 19.3%, assistant.message 8.8% (1935/3025 with
+  text), assistant.turn_start/end 17.4%, user.message 1.7% (572/589),
+  usage_checkpoint 1.7%, system.message 0.5%, binary_asset 0.4%,
+  shutdown 0.3%, skill.invoked/resume/warning ≈ 0.25% each, plus 22
+  rare lifecycle types (mode/canvas/compaction/truncation/subagent/
+  external_tool/notifications, all ≤ 41 occurrences).
+- Audited control/telemetry families now map to `system` (hooks,
+  checkpoints, skill refs, subagent/canvas/compaction/mode lifecycle,
+  binary assets, notifications) and external tool activity to `tool`
+  (exact-type lists, never prefix wildcards). Unknown roles
+  17,892 → 0 on this corpus; remaining `partial` coverage is empty
+  tool-call turns (`missing_content`, still counted). Only genuinely
+  unrecognized future types stay `?` — honest partials preserved.
+- Deterministic suite: 191 → 226 (35 new: status tristate, 8 precision
+  negatives incl. boilerplate/source/README/research/zero-errors,
+  12 recall positives across all status paths, provenance guards,
+  22-type control audit, aggregation proving boilerplate never
+  promotes while genuine repeated failures stay eligible).
+
 ## End-to-end validation (live CASS 0.10.0, Phase 22 corrective build, 30-day corpus)
 
 - Stock 30d review via the reinstalled canonical skill: 207 discovered
