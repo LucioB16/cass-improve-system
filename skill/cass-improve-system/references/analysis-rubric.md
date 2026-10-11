@@ -53,3 +53,26 @@ leads, always verify against the cited session before recommending anything.
   reported as uncertainty, never filtered.
 - Findings carry a stable `id` (`type:fingerprint`) and a `destinations`
   list; reports render each finding once and cross-reference by destination.
+
+## Precision model
+
+- Provenance per message (structured role + structural envelope markers
+  such as [Tool Output], never prose): user_text, assistant_text,
+  tool_result, system, unknown. Recorded per signal, aggregated per
+  finding and in coverage.
+- Eligibility: correction/rediscovery/manual fire on user_text only;
+  retry phrases on user_text only (plus session-level error recurrence
+  across 3+ distinct messages in analyze.py); success on user + assistant
+  prose; error on user + assistant + tool diagnostics.
+- Spanish corrections use phrase structure (imperative-verb + todavia,
+  contradiction verbs, recorda/acordate que), not bare keywords.
+- Confidence is provenance-aware: user-backed findings use standard
+  thresholds; findings with no user-authored evidence cap at medium
+  (same 3-session/2-project systemic bar) and file-echo/pure-diagnostic
+  noise stays low.
+- Findings sharing an evidence fingerprint link via related_ids without
+  merging or re-rendering.
+
+Heuristics remain heuristic: patterns are leads with known precision
+limits (Spanish corrections improved but imperfect; error_mention is
+noisy by nature); the conservative promotion policy is the backstop.

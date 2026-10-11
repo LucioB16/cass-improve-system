@@ -48,9 +48,11 @@ exercise using the real wrappers; no private CASS history required.
   fixtures instead).
 - Each finding id rendered exactly once; category sections and the
   destination index are title-only cross-references.
-- Counts legitimately changed vs baseline (full-scan signals: 1136 singles
-  vs 231 prefix-scanned) because the fixes changed what is observable —
-  see behavioral criteria in PLAN Phase 20.
+- Counts legitimately changed vs baseline (full-scan signals ~990 with
+  signals_by_type/provenance in coverage; all findings low-confidence
+  singles after tool-only false clusters were demoted from the watch list)
+  because the fixes changed what is observable — see behavioral criteria
+  in PLAN Phase 21.
 
 ### Earlier runs (historical)
 

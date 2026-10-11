@@ -749,3 +749,35 @@ No product-contract changes; no release yet.
   report-only intact.
 - [x] Docs updated only where behavior changed; full suite green; atomic
   commits; push; tree clean.
+
+---
+
+# Phase 21 — Precision & noise reduction (v1.4.0 candidate)
+
+Objective: improve precision and finding quality while preserving v1.3.0
+recall (Spanish support, Antigravity roles, full-scan, retention, period
+fidelity, dedup, Freebuff CLI compatibility). No release yet.
+
+- [x] Provenance model: explicit per-message provenance (user_text /
+  assistant_text / tool_result / system / unknown) from structured fields
+  + envelope markers; never from prose.
+- [x] Signal eligibility by (signal, provenance); Spanish correction
+  precision (prohibition-verb `todavia`, contradiction-verb `vos`,
+  `recorda/acordate que`); required pos/neg corpus incl. all accepted
+  examples.
+- [x] Retry: user-authored phrases per-message + session-level error
+  recurrence (3+ distinct messages) in analyze; isolated/copy-paste
+  negatives.
+- [x] Manual procedure restricted to user-authored friction; plan/file-echo
+  negatives.
+- [x] Event grouping: findings sharing an evidence fingerprint link via
+  `related_ids`; report shows relation without re-rendering; stable-ID
+  contract preserved.
+- [x] Provenance-aware confidence: non-user evidence capped (medium needs
+  systemic spread; high needs user evidence); file-echo-only never
+  medium/high.
+- [x] Precision fixture suite (genuine vs negative cases per spec).
+- [x] E2E stock 7d vs v1.3 baseline with exact before/after numbers;
+  WAL recovery, report-only, compat unchanged.
+- [x] Docs (provenance, eligibility, limits); full suite + CI green;
+  atomic commits; push; tree clean.
