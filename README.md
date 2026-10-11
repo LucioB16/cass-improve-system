@@ -98,12 +98,14 @@ One canonical installation, everywhere:
                                            symlink on Linux/macOS)
 ```
 
-The invariant is that every compatibility path resolves to the canonical
-tree, so installs can never drift apart — an update to the canonical copy
-is instantly visible everywhere, and reinstalls stay idempotent. (On
-machines where a whole skills directory is already aliased, e.g. a
-parent-level `.cline/skills` junction, the installer recognizes and
-preserves that layout instead of forcing one filesystem shape.)
+Supported installs use one canonical physical Skill tree, and every
+compatibility path resolves to it — verification detects wrong-target or
+divergent physical layouts and fails safely instead of proceeding on drift.
+An update to the canonical copy is therefore instantly visible everywhere,
+and reinstalls stay idempotent. (On machines where a whole skills directory
+is already aliased, e.g. a parent-level `.cline/skills` junction, the
+installer recognizes and preserves that layout instead of forcing one
+filesystem shape.)
 
 **Windows** (PowerShell):
 
@@ -248,9 +250,10 @@ Install the skill canonically:
 - Linux/macOS (POSIX shell): sh scripts/install-skill.sh --target all
 
 This creates the real skill at ~/.agents/skills/cass-improve-system/ plus
-compatibility links at ~/.claude/skills/cass-improve-system/ and
-~/.cline/skills/cass-improve-system/ (junctions on Windows, symlinks on
-Linux/macOS) pointing at it.
+compatibility paths at ~/.claude/skills/cass-improve-system/ and
+~/.cline/skills/cass-improve-system/ resolving to it (directory junctions
+on Windows, symlinks on Linux/macOS; a pre-existing parent-level alias such
+as a whole-`.cline/skills` junction is recognized and preserved).
 
 Run the repository's verification steps after installation and report the
 OS, installed CASS version, canonical skill path, link target, and

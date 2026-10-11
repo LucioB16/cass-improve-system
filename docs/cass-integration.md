@@ -52,8 +52,11 @@ cass index --full --json --no-progress-events
 - **Never run bare `cass`** — it launches an interactive TUI. All
   agent-facing calls use `--robot` (alias `--json`) for machine-readable output.
 - Read operations pass `--no-maintenance`: strict read-only, no checkpoint
-  refresh, no daemon spawn. `--refresh` (index catch-up) is never used by the
-  review path; index maintenance is a separate, explicit user action.
+  refresh, no daemon spawn. `--refresh` (index catch-up) is never used by
+  the review path. The single exception is preflight on stale-only state
+  (see below): one bounded incremental `cass index`, never `--full`,
+  mutating only CASS-derived index/archive state; uninitialized/broken
+  states still stop and remain an explicit user action.
 - `cass search "<q>" --robot --mode lexical --since <t> --fields summary
   --limit N --max-tokens N --no-maintenance` — corpus probing with a token budget.
 - `cass sessions --since <t> --json --limit N [--agent A] [--workspace W]` —

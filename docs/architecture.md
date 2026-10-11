@@ -80,7 +80,10 @@ recurrence per period class with explicit period metadata.
   session data: `--no-maintenance` on every read; the single exception is
   preflight's bounded incremental refresh on stale-only state (never
   `--full`, CASS-derived state only).
-- Context control: per-message/per-session truncation, `--max-tokens` on
-  search, hierarchical batches instead of full-corpus concatenation.
+- Context control: full exports are always scanned for signals; only the
+  retained message/excerpt context is bounded (stratified retention within
+  the session context budget), `--max-tokens` on search, hierarchical
+  batches instead of full-corpus concatenation; original message indices
+  stay intact, so discovery never stops at the retention cap.
 - Persistent review output (only when requested) lives under
   `~/.agents/state/cass-improve-system/`, never inside the reviewed projects.

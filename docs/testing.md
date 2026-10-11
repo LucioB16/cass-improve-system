@@ -45,8 +45,9 @@ exercise using the real wrappers; no private CASS history required.
 - Pre-window-only recurrence contributes zero in-window evidence
   (the exact independent failure construction now yields no promotion;
   verified before/after: HIGH with phantom in_window=12 → nothing promoted).
-- 0 high / 1 medium (a repeated user-authored request template with
-  genuine in-window repetition — defensible, reviewer-judged).
+- 0 high / 1 medium (a repeated request template with genuine in-window
+  repetition — defensible under policy; one of its two cross-project
+  occurrences is an assistant echo, so it is correctly capped at medium).
 - WAL recovery, report-only behavior, and install/compat architecture
   unchanged.
 
@@ -57,14 +58,21 @@ exercise using the real wrappers; no private CASS history required.
   WAL-recovered; opencode 142 + codex 52 + antigravity 13; 24 workspaces.
 - The false high-confidence OH-MY-OPENCODE directive finding is gone
   (directive → `injected_system`, zero user evidence).
-- 7 medium → 1 defensible medium (repeated user-authored request template);
-  template/file-echo clusters demoted to low via template cap +
-  corroboration rule.
-- Every signal carries period provenance (3363 in-window, 233 pre-window,
-  0 unknown); pre-window evidence displays as corroboration, never
-  promotes alone.
-- Spanish corrections live (23 signals incl. genuine cases); manual (22)
-  and retry (30) signals all user-authored.
+- 7 medium → 1 remaining medium (a repeated request template with genuine
+  in-window repetition — defensible under policy, but note one of its two
+  cross-project occurrences is an assistant echo of the user's request, so
+  the evidence is thinner than the raw count suggests; correctly capped at
+  medium, not a blocker); template/file-echo clusters demoted to low via
+  template cap + corroboration rule.
+- Normalize-emitted signals carry period provenance (3363 in-window,
+  233 pre-window, 0 unknown in this run); pre-window evidence displays as
+  corroboration, never promotes alone. Note: at the time of this run,
+  analyze-stage synthesized retry signals did not yet carry period — that
+  gap was the release-blocking bug fixed by the Phase 22 corrective
+  (period-scoped synthesis) before v1.5.0.
+- Spanish corrections live (23 signals incl. genuine cases); direct
+  normalized manual (22) and retry (30) signals all user-authored
+  (synthesized retries derive their period from their evidence class).
 - WAL recovery, report-only behavior, and install/compat architecture
   unchanged.
 
