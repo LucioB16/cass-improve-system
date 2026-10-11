@@ -1,18 +1,18 @@
-# cass-improve-system
-
 <p align="center">
   <img src="assets/cass-improve-system-icon.png" alt="cass-improve-system icon" width="140" />
 </p>
+
+<h1 align="center">cass-improve-system</h1>
 
 <p align="center">
   <strong>Turn a week of scattered coding-agent sessions into concrete improvements.</strong>
 </p>
 
 <p align="center">
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![GitHub issues](https://img.shields.io/github/issues/LucioB16/cass-improve-system)](https://github.com/LucioB16/cass-improve-system/issues)
-[![GitHub last commit](https://img.shields.io/github/last-commit/LucioB16/cass-improve-system)](https://github.com/LucioB16/cass-improve-system/commits/main)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/LucioB16/cass-improve-system/pulls)
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="https://github.com/LucioB16/cass-improve-system/issues"><img src="https://img.shields.io/github/issues/LucioB16/cass-improve-system" alt="GitHub issues" /></a>
+  <a href="https://github.com/LucioB16/cass-improve-system/commits/main"><img src="https://img.shields.io/github/last-commit/LucioB16/cass-improve-system" alt="GitHub last commit" /></a>
+  <a href="https://github.com/LucioB16/cass-improve-system/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome" /></a>
 </p>
 
 A portable agent skill for **batch retrospective analysis** across all your
