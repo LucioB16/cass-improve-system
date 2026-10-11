@@ -725,3 +725,27 @@ onto canonical `.agents\skills` (read-only verified, never modified).
   isolated-HOME install/verify/reinstall/uninstall exercise.
 - [x] Run the complete suite; inspect `git diff` for secrets/paths/caches;
   commit, push, verify remote + clean status.
+
+---
+
+# Phase 20 — Analysis-quality hardening (from Freebuff CLI acceptance)
+
+Based on a real 7-day Freebuff CLI acceptance run (13 discovered / 13 analyzed).
+No product-contract changes; no release yet.
+
+- [x] P1 multilingual signals: Spanish support for user_correction,
+  retry_loop, manual_procedure, rediscovery, success_pattern
+  (accent-insensitive, EN preserved, pos+neg tests).
+- [x] P2 Antigravity roles: conservative source/type → user/assistant mapping
+  from live export shape; sanitized synthetic fixtures; unknown stays `?`.
+- [x] P3 long sessions: full-scan signal extraction + bounded stratified
+  message retention (user/signal turns + head/tail); late-signal regression test.
+- [x] P4 period fidelity: activity range from message/inventory timestamps vs
+  requested bounds; flag out-of-period + uncertainty, never silently drop.
+- [x] P5 report dedup: stable finding identity; render each finding once;
+  multiple destinations inside the finding; dedup regression tests.
+- [x] E2E: reinstall canonical skill, manifest-verify, stock 7d review,
+  before/after comparison vs baseline, WAL recovery still working,
+  report-only intact.
+- [x] Docs updated only where behavior changed; full suite green; atomic
+  commits; push; tree clean.

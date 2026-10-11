@@ -32,7 +32,27 @@ CI (`.github/workflows/ci.yml`, matrix windows/ubuntu/macos) runs the unit
 suite plus an isolated-HOME install → verify → reinstall → uninstall
 exercise using the real wrappers; no private CASS history required.
 
-## End-to-end validation (live CASS 0.10.0, 2026-10-10)
+## End-to-end validation (live CASS 0.10.0, Phase 20 build)
+
+- Stock 7d review via the reinstalled canonical skill: 13 discovered →
+  13 analyzed, 0 skipped, 11 WAL-recovered (adapter unchanged and working);
+  agents antigravity + opencode, 6 workspaces — same corpus as baseline.
+- Spanish corrections now auto-detected (15 `user_correction` signals,
+  including the previously-missed "NO pases todavía" class); Antigravity
+  roles normalized (203 user / 429 assistant / 5 unknown, was ~all `?`).
+- Long sessions use stratified retention (e.g. 1538→88 and 967→118
+  messages, always ≤120); signals are full-scan so late corrections
+  (e.g. `#msg354`) are found.
+- All 13 sessions carry message-level activity ranges; 0 flagged
+  out-of-period in this window (the stale-mtime case is covered by unit
+  fixtures instead).
+- Each finding id rendered exactly once; category sections and the
+  destination index are title-only cross-references.
+- Counts legitimately changed vs baseline (full-scan signals: 1136 singles
+  vs 231 prefix-scanned) because the fixes changed what is observable —
+  see behavioral criteria in PLAN Phase 20.
+
+### Earlier runs (historical)
 
 - 7d review via the installed `~/.agents` copy (stock skill, no custom
   normalizer): 13 discovered → **13 analyzed, 0 skipped**, 2 agents
