@@ -43,6 +43,8 @@ def infer_role(msg: dict) -> str:
     verified live against CASS 0.10.0 exports. Anything else stays `?` —
     roles are never guessed from message text.
     """
+    if not isinstance(msg, dict):
+        return "?"
     raw = msg.get("role", "")
     if isinstance(raw, str) and raw.strip() and raw.strip().lower() not in ("?", "unknown"):
         folded = raw.strip().lower()
@@ -61,6 +63,21 @@ def infer_role(msg: dict) -> str:
                       "AGENT_RESPONSE", "MODEL_RESPONSE"):
         return "assistant"
     if source == "SYSTEM" or mtype in ("SYSTEM_MESSAGE", "CHECKPOINT"):
+        return "system"
+    # GitHub Copilot Chronicle events (verified: CASS `export --format json`
+    # returns these raw, with message payloads nested under `data`).
+    # Dotted lowercase discriminators; matched case-insensitively on the
+    # exact known set only — unknown future event types stay `?`.
+    ctype = str(msg.get("type", "") or "").strip().lower()
+    if ctype in ("user.message", "userpromptsubmitted"):
+        return "user"
+    if ctype in ("assistant.message", "assistantresponse"):
+        return "assistant"
+    if ctype in ("tool.execution_start", "tool.execution_complete"):
+        return "tool"
+    if ctype in ("system.message", "session.start", "session.model_change",
+                 "session.task_complete", "session.shutdown",
+                 "assistant.turn_start", "assistant.turn_end"):
         return "system"
     return "?"
 
@@ -179,6 +196,7 @@ _PATTERNS: dict[str, dict[str, object]] = {
             r"forget (it|that)",
             r"revert (that|it)",
             r"that's not what i (asked|meant)",
+            r"that is not what i (asked|meant)",
             r"wrong (file|approach|direction)",
         ],
         "es": [
@@ -341,6 +359,62 @@ def _excerpt(text: str) -> str:
     return text
 
 
+MAX_CHARS_PER_EVENT = 4000
+
+
+def _text_from_value(value: object) -> str:
+    """Extract human text from a content-shaped value. Strings pass through;
+    lists join their text parts (e.g. [{"type": "text", "text": "..."}]);
+    anything else yields "" rather than a JSON dump of an opaque envelope."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = [_text_from_value(item) for item in value]
+        return "\n".join(p for p in parts if p.strip())
+    if isinstance(value, dict):
+        text = value.get("text", "")
+        return text if isinstance(text, str) else ""
+    return ""
+
+
+def extract_text(msg: dict) -> str:
+    """Extract message text from top-level or enveloped content.
+
+    Order: explicit top-level `content` (existing vendors), then Copilot
+    Chronicle `data.content`, then `payload.content` (tolerance matching
+    upstream envelope handling). Tool payloads additionally try
+    result/output/summary keys. Returns "" when nothing interpretable
+    exists; callers distinguish that from real content for coverage.
+    Never stringifies whole event envelopes.
+    """
+    if not isinstance(msg, dict):
+        return ""
+    top = msg.get("content", "")
+    if isinstance(top, str) and top.strip():
+        return top[:MAX_CHARS_PER_EVENT]
+    if isinstance(top, (dict, list)):
+        text = _text_from_value(top)
+        if text.strip():
+            return text[:MAX_CHARS_PER_EVENT]
+        if top:
+            # Legacy fallback: top-level structured content with no
+            # recognized text shape is dumped rather than dropped, exactly
+            # as previous versions behaved for existing vendors.
+            return json.dumps(top)[:MAX_CHARS_PER_EVENT]
+        return ""
+    for envelope in ("data", "payload", "metadata"):
+        env = msg.get(envelope, "")
+        if isinstance(env, dict):
+            text = _text_from_value(env.get("content", ""))
+            if text.strip():
+                return text[:MAX_CHARS_PER_EVENT]
+            for key in ("result", "output", "summary", "message"):
+                text = _text_from_value(env.get(key, ""))
+                if text.strip():
+                    return text[:MAX_CHARS_PER_EVENT]
+    return ""
+
+
 def extract_signals(role: str, text: str, ref: str, prov: str | None = None) -> list[dict]:
     """Heuristic per-message signal detection. All matches are DERIVED.
 
@@ -421,8 +495,11 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
         "metadata": {"truncated": False, "export_failed": False,
                      "recovered_from_panic": False, "sampling": "none",
                      "total_messages": 0, "retained_messages": 0,
-                     "activity_start": None, "activity_end": None,
-                     "timestamps": "none", "out_of_period": False},
+        "activity_start": None, "activity_end": None,
+        "timestamps": "none", "out_of_period": False,
+        "raw_event_count": 0, "interpretable_messages": 0,
+        "unknown_role_count": 0, "missing_content_count": 0,
+        "unsupported_event_count": 0, "content_coverage": "empty"},
     }
     try:
         raw, recovered = export_session(
@@ -431,23 +508,56 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
     except CassError:
         session["metadata"]["export_failed"] = True
         return session
+    session["metadata"]["raw_event_count"] = len(raw)
     raw = [m for m in raw if isinstance(m, dict)]
     total = len(raw)
     session["metadata"]["total_messages"] = total
+    unsupported = 0
+    malformed = session["metadata"]["raw_event_count"] - total
+    if malformed > 0:
+        # Non-object records in the export: uninterpretable by construction.
+        unsupported += malformed
     bound_start = entry.get("_period_start")
     bound_end = entry.get("_period_end")
     # Full scan for signals FIRST so late-session behavior is discoverable;
     # retention below is only about which message bodies are kept.
     scanned: list[tuple[int, str, str, str, str | None]] = []  # (index, role, prov, text, time)
     user_idx: list[int] = []
+    interpretable = 0
+    unknown_roles = 0
+    missing_content = 0
     for i, msg in enumerate(raw):
         role = infer_role(msg)
-        content = msg.get("content", "")
-        text = content if isinstance(content, str) else json.dumps(content)[:4000]
+        text = extract_text(msg)
         prov = derive_provenance(role, text)
         scanned.append((i, role, prov, text, message_time(msg)))
         if role == "user":
             user_idx.append(i)
+        if prov in ("user_text", "assistant_text", "tool_result") and text.strip():
+            interpretable += 1
+        elif prov == "unknown":
+            # Recognized event shape unknown to us, or no role signal at
+            # all: counted honestly instead of silently dropped.
+            unknown_roles += 1
+            unsupported += 1
+        elif prov in ("user_text", "assistant_text") and not text.strip():
+            # A conversational turn with no decodable text.
+            missing_content += 1
+            unsupported += 1
+    session["metadata"]["interpretable_messages"] = interpretable
+    session["metadata"]["unknown_role_count"] = unknown_roles
+    session["metadata"]["missing_content_count"] = missing_content
+    session["metadata"]["unsupported_event_count"] = unsupported
+    if total == 0 or (interpretable == 0 and unknown_roles == 0 and missing_content == 0):
+        # No records at all, or only system/injected/control records:
+        # nothing to interpret, but nothing lost either.
+        session["metadata"]["content_coverage"] = "empty"
+    elif interpretable == 0:
+        session["metadata"]["content_coverage"] = "none"
+    elif unsupported > 0:
+        session["metadata"]["content_coverage"] = "partial"
+    else:
+        session["metadata"]["content_coverage"] = "full"
     ordered_signals: list[dict] = []
     signal_idx: list[int] = []
     for i, role, prov, text, msg_time in scanned:
@@ -495,6 +605,14 @@ def normalize_one(entry: dict, timeout_s: int = 120) -> dict:
             for call in tools[:20]:
                 name = call.get("name") if isinstance(call, dict) else str(call)
                 session["tool_calls"].append(str(name)[:120])
+        data = raw[i].get("data", "")
+        if isinstance(data, dict):
+            for call in data.get("toolRequests", [])[:20]:
+                if isinstance(call, dict):
+                    for key in ("tool", "name", "toolName"):
+                        if isinstance(call.get(key), str) and call[key].strip():
+                            session["tool_calls"].append(call[key].strip()[:120])
+                            break
     return session
 
 
@@ -532,6 +650,10 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
     recovered = sum(1 for s in ok if s["metadata"].get("recovered_from_panic"))
     outside = sum(1 for s in ok if s["metadata"].get("out_of_period"))
     unknown_ts = sum(1 for s in ok if s["metadata"].get("timestamps") == "none")
+    content_none = sum(1 for s in ok
+                       if s["metadata"].get("content_coverage") == "none")
+    content_partial = sum(1 for s in ok
+                          if s["metadata"].get("content_coverage") == "partial")
     by_type: dict[str, int] = {}
     by_prov: dict[str, int] = {}
     for s in ok:
@@ -549,6 +671,8 @@ def normalize_inventory(inventory: dict, timeout_s: int = 120) -> dict:
             "sessions_recovered": recovered,
             "sessions_outside_period": outside,
             "sessions_timestamp_unknown": unknown_ts,
+            "sessions_content_none": content_none,
+            "sessions_content_partial": content_partial,
             "signals_by_type": dict(sorted(by_type.items())),
             "signals_by_provenance": dict(sorted(by_prov.items())),
         },

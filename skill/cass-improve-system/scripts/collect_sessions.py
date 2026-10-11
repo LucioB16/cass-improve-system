@@ -17,7 +17,7 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 
-from cass_adapter import CassError, list_sessions
+from cass_adapter import CassError, fetch_inventory
 from period import parse_period
 
 
@@ -86,16 +86,26 @@ def collect(
             "narrow with --agent/--workspace instead")
     # NOTE: `cass sessions` supports --since but not --until on all versions;
     # until is applied as a client-side filter below when present.
-    # Fetch limit+1 to detect truncation exactly (a corpus of exactly
-    # `limit` sessions is otherwise indistinguishable from a capped one).
-    sessions = list_sessions(
-        since=since, limit=limit + 1, agent=agents or None,
-        workspace=workspaces or None, timeout_s=timeout_s,
+    # fetch_inventory() handles the --agent incompatibility internally
+    # (timeline path) and reports whether the result is complete.
+    sessions, fetch_info = fetch_inventory(
+        since=since, limit=limit, agent=agents or None,
+        workspace=workspaces or None, timeout_s=timeout_s, until=until,
     )
     if until:
+        # Client-side end filter; only ever shrinks an already-fetched set,
+        # so it cannot invalidate the completeness verdict below.
         sessions = [s for s in sessions if _session_on_or_before(s, until)]
-    limit_reached = len(sessions) > limit
-    sessions = sessions[:limit]
+    if fetch_info.get("complete") is None:
+        inventory_state = ("UNVERIFIED — " + fetch_info.get("detail", ""))
+        limit_reached = False
+    elif not fetch_info.get("complete", True):
+        inventory_state = ("CAPPED — more sessions exist; re-run with a higher "
+                           "--limit (max 5000) or narrower filters")
+        limit_reached = True
+    else:
+        inventory_state = "COMPLETE"
+        limit_reached = False
     bound_start = resolve_bound(since, is_end=False)
     bound_end = resolve_bound(until, is_end=True) or _utcnow().isoformat()
     for s in sessions:
@@ -112,9 +122,7 @@ def collect(
             "sessions_returned": len(sessions),
             "limit": limit,
             "limit_reached": limit_reached,
-            "inventory": "CAPPED — more sessions exist; re-run with a higher "
-                         "--limit (max 5000) or narrower filters" if limit_reached
-                         else "COMPLETE",
+            "inventory": inventory_state,
             "agents": agents_seen,
             "workspaces": workspaces_seen,
         },

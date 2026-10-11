@@ -175,22 +175,165 @@ def list_sessions(
     agent: list[str] | None = None,
     workspace: list[str] | None = None,
     timeout_s: int = 120,
+    until: str | None = None,
 ) -> list[dict]:
-    argv = ["sessions", "--limit", str(limit)]
+    """Backward-compatible inventory fetch. Prefer fetch_inventory(), which
+    also reports how complete the result is. Extra agent filters never reach
+    `cass sessions` (it rejects --agent on 0.10.0); they use the timeline
+    path or client-side filtering inside fetch_inventory()."""
+    sessions, _info = fetch_inventory(
+        since=since, limit=limit, agent=agent, workspace=workspace,
+        timeout_s=timeout_s, until=until)
+    return sessions
+
+
+def _ms_epoch_to_iso(value: object) -> str | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value > 0:
+        try:
+            from datetime import datetime, timezone
+            return datetime.fromtimestamp(float(value) / 1000.0,
+                                         tz=timezone.utc).isoformat()
+        except (ValueError, OverflowError, OSError):
+            return None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _timeline_filtered(since: str | None, until: str | None,
+                       agents: list[str],
+                       timeout_s: int) -> tuple[list[dict], bool]:
+    """Server-side agent filtering via `cass timeline` (which accepts
+    --agent, unlike `cass sessions` on 0.10.0). Returns (entries, complete).
+
+    Timeline entries carry no workspace and use different activity-time
+    semantics than `sessions` (verified live: each misses sessions the
+    other finds), so callers must UNION both sources, never substitute.
+    Entries are mapped to inventory shape with ISO timestamps.
+    """
+    argv = ["timeline", "--group-by", "none"]
     if since:
         argv += ["--since", since]
-    for a in agent or []:
+    if until:
+        argv += ["--until", until]
+    for a in agents:
         argv += ["--agent", a]
-    for w in workspace or []:
+    result = run_cass_json(argv, timeout_s=timeout_s)
+    if not isinstance(result, dict):
+        raise CassError("timeline returned unexpected output; "
+                        "cannot verify agent-filtered inventory.")
+    items = result.get("sessions", [])
+    if not isinstance(items, list):
+        raise CassError("timeline returned unexpected output; "
+                        "cannot verify agent-filtered inventory.")
+    total = result.get("total_sessions")
+    complete = True if total is None else len(items) >= int(total)
+    sessions = []
+    for entry in items:
+        if not isinstance(entry, dict) or not entry.get("source_path"):
+            continue
+        started = _ms_epoch_to_iso(entry.get("started_at"))
+        ended = _ms_epoch_to_iso(entry.get("ended_at")) or started
+        sessions.append({
+            "path": entry.get("source_path"),
+            "agent": entry.get("agent", "?"),
+            "workspace": "?",
+            "source_id": entry.get("source_id", "local"),
+            "title": entry.get("title"),
+            "started_at": started,
+            "ended_at": ended,
+            "modified": ended or started,
+            "message_count": entry.get("message_count"),
+        })
+    return sessions, complete
+
+
+def fetch_inventory(
+    since: str | None = None,
+    limit: int = 200,
+    agent: list[str] | None = None,
+    workspace: list[str] | None = None,
+    timeout_s: int = 120,
+    until: str | None = None,
+) -> tuple[list[dict], dict]:
+    """Enumerate sessions plus machine-readable completeness info.
+
+    Routing (all inside this adapter):
+    - No agent filter: `sessions` (--workspace is server-supported there);
+      limit+1 probe gives exact COMPLETE/CAPPED.
+    - Agent filter: UNION of `sessions` and agent-filtered `timeline`,
+      because the two endpoints use different activity-time semantics and
+      each misses sessions the other finds (verified live). Timeline-only
+      substitution would silently drop sessions.
+    Client-side agent/workspace filtering applies over the merged set.
+    COMPLETE requires an uncapped sessions fetch AND (when applicable) a
+    complete timeline result AND complete workspace enrichment; otherwise
+    UNVERIFIED (never a false COMPLETE). Trims to `limit`.
+    Returns (sessions, {"via", "complete": bool|None, "detail"}).
+    """
+    agents = [a for a in (agent or []) if a]
+    workspaces = [w for w in (workspace or []) if w]
+    argv = ["sessions", "--limit", str(limit + 1)]
+    if since:
+        argv += ["--since", since]
+    for w in workspaces:
         argv += ["--workspace", w]
     result = run_cass_json(argv, timeout_s=timeout_s)
     if isinstance(result, dict):
-        sessions = result.get("sessions", [])
+        base = result.get("sessions", [])
     elif isinstance(result, list):
-        sessions = result
+        base = result
     else:
-        sessions = []
-    return sessions if isinstance(sessions, list) else []
+        base = []
+    if not isinstance(base, list):
+        base = []
+    raw_capped = len(base) > limit
+    ws_map = {s.get("path"): s.get("workspace") for s in base
+              if isinstance(s, dict) and s.get("path")}
+    enrich_complete = not raw_capped
+    timeline_complete = True
+    if agents:
+        try:
+            extra, timeline_complete = _timeline_filtered(
+                since, until, agents, timeout_s)
+        except CassError:
+            # Older CASS without timeline agent support: sessions only.
+            timeline_complete = False
+        else:
+            seen = {s.get("path") for s in base
+                    if isinstance(s, dict)}
+            for entry in extra:
+                if entry["path"] not in seen:
+                    entry["workspace"] = ws_map.get(entry["path"]) or "?"
+                    base.append(entry)
+                    seen.add(entry["path"])
+    if agents:
+        base = [s for s in base
+                if isinstance(s, dict) and s.get("agent") in agents]
+    if workspaces:
+        base = [s for s in base
+                if isinstance(s, dict) and s.get("workspace") in workspaces]
+    trimmed = len(base) > limit
+    sessions = base[:limit]
+    if not agents:
+        if raw_capped or trimmed:
+            info = {"via": "sessions", "complete": False,
+                    "detail": "limit+1 probe"}
+        else:
+            info = {"via": "sessions", "complete": True,
+                    "detail": "full period set fetched"}
+    elif raw_capped or trimmed or not timeline_complete or \
+            (workspaces and not enrich_complete):
+        info = {"via": "sessions+timeline", "complete": None,
+                "detail": "agent filter over merged sources; matching "
+                          "sessions may exist beyond the fetched window"}
+    else:
+        info = {"via": "sessions+timeline", "complete": True,
+                "detail": "uncapped sessions fetch plus complete "
+                          "server-side agent-filtered timeline"}
+    return sessions, info
 
 
 def timeline(
