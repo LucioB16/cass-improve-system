@@ -30,11 +30,44 @@ determinism, multilingual correction precision, provenance eligibility,
 injected-system detection, stratified retention, period provenance and
 period-aware promotion, COMPLETE/CAPPED inventory, session retry synthesis
 (incl. mixed-period, numeric ordering, idempotency), template collapse,
-related-ids dedup, UTF-16 input tolerance.
+related-ids dedup, UTF-16 input tolerance, Copilot Chronicle role/content
+mapping (incl. legacy discriminators, explicit-role precedence, tool and
+lifecycle handling, malformed envelopes), nested content extraction
+(blocks, tool payloads, redaction, retention bounds), semantic coverage
+states (full/partial/none/empty, control-only, malformed), timeline-based
+agent filtering (union semantics, UNVERIFIED fallback, workspace server
+flag), synthetic Copilot end-to-end (promotion, evidence refs, empty
+corpus).
 
 CI (`.github/workflows/ci.yml`, matrix windows/ubuntu/macos) runs the unit
 suite plus an isolated-HOME install → verify → reinstall → uninstall
 exercise using the real wrappers; no private CASS history required.
+
+## Copilot Chronicle compatibility (synthetic + live-shape validation)
+
+- `cass export --format json` on Copilot `events.jsonl` returns raw events
+  (`{type, data, timestamp}`), verified live against a synthetic Chronicle
+  file in TEMP (no index writes): 9/9 events round-tripped with keys
+  `data/timestamp/type`. Same legitimate per-connector behavior as
+  Antigravity transcripts — no upstream defect implied.
+- Normalization maps dotted event types from an exact allow-list
+  (`user.message` → user, `assistant.message` → assistant, tool execution
+  events → tool, session/system/turn lifecycle → system), extracts nested
+  `data.content` (plus `payload.content`, tool result/output/summary),
+  and never dumps whole envelopes as messages.
+- Semantic coverage per session (full/partial/none/empty) counts
+  interpretable, unknown-role, and missing-content events; control-only
+  sessions are `empty`, not failures; reports warn explicitly when
+  sessions yield no interpretable content.
+- Agent filtering no longer passes `--agent` to `cass sessions` (rejected
+  on 0.10.0): agent-scoped inventory unions `sessions` with agent-filtered
+  `timeline`, since the two endpoints use different activity-time
+  semantics and each misses sessions the other finds (verified live:
+  timeline found 9/11 opencode sessions). Completeness is COMPLETE only
+  when uncapped on all sources, else UNVERIFIED — never a false COMPLETE.
+- No local Copilot sessions exist on the validation machine
+  (`~/.copilot/session-state` absent), so live-history Copilot E2E awaits
+  independent retest; deterministic fixtures prove detection mechanics.
 
 ## End-to-end validation (live CASS 0.10.0, Phase 22 corrective build, 30-day corpus)
 

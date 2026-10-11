@@ -59,14 +59,29 @@ cass index --full --json --no-progress-events
   states still stop and remain an explicit user action.
 - `cass search "<q>" --robot --mode lexical --since <t> --fields summary
   --limit N --max-tokens N --no-maintenance` — corpus probing with a token budget.
-- `cass sessions --since <t> --json --limit N [--agent A] [--workspace W]` —
+- `cass sessions --since <t> --json --limit N [--workspace W]` —
   session enumeration. Accepts `--since` (`-24h`, `-7d`, ISO, `today`); no
   `--until` on this version (client-side filtering is used instead).
-- `cass timeline --since <t> [--until <u>] --json --group-by none` — flat
-  session inventory with `started_at`/`ended_at` (ms epoch), agent, workspace,
-  `source_path`, `message_count`, `source_id`.
+  IMPORTANT: `cass sessions` rejects `--agent` on 0.10.0
+  (`error: unexpected argument '--agent' found`). The adapter therefore
+  never passes `--agent` to `sessions`: agent-scoped inventory is built
+  from the UNION of `sessions` and agent-filtered `timeline`
+  (`--agent` IS supported there), because the two endpoints use different
+  activity-time semantics and each misses sessions the other finds
+  (verified live). Completeness is COMPLETE only when both sources are
+  uncapped; otherwise UNVERIFIED, never a false COMPLETE.
+- `cass timeline --since <t> [--until <u>] [--agent A] --json --group-by none` — flat
+  session inventory with `started_at`/`ended_at` (ms epoch), agent,
+  `source_path`, `message_count`, `source_id` (no workspace field; the
+  adapter enriches it best-effort from a sessions fetch).
 - `cass export <source_path> --source <id> --format json` — full message array
   (`role`, `content`, `timestamp`). Works for archive/DB-backed sessions.
+  For Copilot Chronicle sources the export returns RAW events
+  (`{type, data, timestamp}` with payloads nested under `data.content`),
+  not normalized role/content messages — verified live against a
+  synthetic `events.jsonl`. This is legitimate per-connector export output
+  (same as Antigravity transcripts), so the adapter normalizes it
+  downstream; no upstream change is implied.
 - `cass view <path> --message-index <line_number> --json` — expand a single
   search hit from the archive without exporting the whole session.
 - `cass health --json` / `cass status --json` — readiness; `initialized`,
@@ -109,3 +124,8 @@ is isolated in `skill/cass-improve-system/scripts/cass_adapter.py`.
   limitations. Temp files are always cleaned up.
 - `cass sessions` has `--since` but no `--until` on this version; the skill
   filters the end of the range client-side.
+- Copilot Chronicle exports are raw source events, not an upstream defect:
+  per-connector export shapes differ legitimately (Antigravity transcripts
+  behave the same way), and CASS's own connector code documents nested
+  `data.content` handling — so the adapter normalizes them downstream and
+  no upstream issue was filed.

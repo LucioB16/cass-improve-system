@@ -16,7 +16,15 @@ leads, always verify against the cited session before recommending anything.
 ## Normalization guarantees
 
 - Roles: explicit `role` passes through (`human`→user); Antigravity
-  `source`/`type` map conservatively to user/assistant; unknown stays `?`.
+  `source`/`type` map conservatively to user/assistant; Copilot Chronicle
+  dotted event types (`user.message`, `assistant.message`, tool execution,
+  system/lifecycle) map from an exact allow-list; unknown stays `?`.
+- Content: top-level `content` first, then nested `data.content`
+  (Copilot Chronicle) / `payload.content`; tool payloads try
+  result/output/summary keys; event envelopes are never dumped as messages.
+- Sessions carry semantic content coverage (full/partial/none/empty):
+  unknown formats and undecodable turns are counted, never silently
+  dropped; control-only sessions are `empty`, not failures.
 - Signals are extracted from the FULL export; message bodies use bounded
   stratified retention (signal-bearing + user turns first, then head/tail,
   max 120). Evidence refs always point at original message indices.
@@ -39,20 +47,6 @@ leads, always verify against the cited session before recommending anything.
    candidate, with occurrence/session/project counts as its weight.
 6. Sort by expected value × confidence, not raw frequency: a twice-repeated
    30-minute debugging loop beats a ten-times-repeated trivial typo.
-
-## Normalization guarantees
-
-- Roles: explicit `role` passes through (`human`→user); Antigravity
-  `source`/`type` map conservatively to user/assistant; unknown stays `?`.
-- Signals are extracted from the FULL export; message bodies use bounded
-  stratified retention (signal-bearing + user turns first, then head/tail,
-  max 120). Evidence refs always point at original message indices.
-- Activity ranges come from message timestamps (else inventory fields);
-  sessions whose reliable range falls fully outside the requested period
-  are flagged `out_of_period` but never dropped; missing timestamps are
-  reported as uncertainty, never filtered.
-- Findings carry a stable `id` (`type:fingerprint`) and a `destinations`
-  list; reports render each finding once and cross-reference by destination.
 
 ## Precision model
 
