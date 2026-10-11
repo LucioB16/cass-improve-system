@@ -36,11 +36,14 @@ def _read_stdin_text() -> str:
 
 
 def _finding_block(finding: dict) -> list[str]:
-    title = TYPE_TITLES.get(finding["signal_type"], finding["signal_type"])
+    title = finding.get("title") or TYPE_TITLES.get(
+        finding["signal_type"], finding["signal_type"])
+    destinations = finding.get("destinations") or \
+        ([finding["suggested_destination"]] if finding.get("suggested_destination") else [])
     lines = [
-        f"### {title}",
+        f"### {title} `[{finding.get('id', '?')}]`",
         f"Type: {finding['signal_type']}",
-        f"Destination: {finding['suggested_destination']}",
+        f"Destinations: {', '.join(destinations) or '?'}",
         f"Evidence: {finding['occurrences']} occurrence(s) across "
         f"{finding['session_count']} session(s), {finding['project_count']} project(s); "
         f"agents: {', '.join(finding['agents'])}; "
@@ -60,6 +63,31 @@ def _finding_block(finding: dict) -> list[str]:
     return lines
 
 
+def _destination_index(grouped: list[dict]) -> list[str]:
+    """Title-only cross-reference: each finding rendered once above, indexed
+    here by destination without repeating evidence."""
+    lines = ["## Index by destination", ""]
+    by_dest: dict[str, list[dict]] = {}
+    for finding in grouped:
+        destinations = finding.get("destinations") or \
+            ([finding["suggested_destination"]] if finding.get("suggested_destination") else ["?"])
+        for dest in destinations:
+            by_dest.setdefault(dest, []).append(finding)
+    if not by_dest:
+        lines.append("No findings to index.")
+        lines.append("")
+        return lines
+    for dest in sorted(by_dest):
+        lines.append(f"### {dest}")
+        for finding in by_dest[dest]:
+            title = finding.get("title", finding.get("signal_type", "?"))
+            lines.append(f"- {title} `[{finding.get('id', '?')}]` "
+                         f"({finding['confidence']}, "
+                         f"{finding['session_count']} sessions)")
+        lines.append("")
+    return lines
+
+
 def render(findings: dict) -> str:
     period = findings.get("period", {}).get("label", "?")
     coverage = findings.get("coverage", {})
@@ -72,6 +100,10 @@ def render(findings: dict) -> str:
         f"- sessions skipped/failed: {coverage.get('sessions_skipped', '?')}",
         f"- agents: {', '.join(coverage.get('agents', [])) or '?'}",
         f"- projects/workspaces: {len(coverage.get('workspaces', []))} distinct",
+        f"- sessions outside requested period (kept, flagged): "
+        f"{coverage.get('sessions_outside_period', 0)}",
+        f"- sessions without usable timestamps: "
+        f"{coverage.get('sessions_timestamp_unknown', 0)}",
         "",
         "## Executive summary",
         "",
@@ -95,28 +127,38 @@ def render(findings: dict) -> str:
     else:
         lines.append("None in this period.")
         lines.append("")
-    for section, group in (("## Automation candidates", [f for f in candidates + watch
-                             if "AUTOMATION" in f["suggested_destination"]]),
-                           ("## New skill candidates", [f for f in candidates + watch
-                             if "NEW SKILL" in f["suggested_destination"]]),
-                           ("## Global-rule candidates", [f for f in candidates + watch
-                             if "GLOBAL RULE" in f["suggested_destination"]]),
-                           ("## Project-specific improvements", [f for f in candidates + watch
-                             if "PROJECT" in f["suggested_destination"]])):
+    # Category sections are title-only cross-references: every finding is
+    # rendered in full exactly once (above); destinations live in the finding.
+    def _dest_matches(finding: dict, needle: str) -> bool:
+        destinations = finding.get("destinations") or \
+            ([finding["suggested_destination"]] if finding.get("suggested_destination") else [])
+        return any(needle in d for d in destinations)
+
+    for section, needle in (("## Automation candidates", "AUTOMATION"),
+                            ("## New skill candidates", "NEW SKILL"),
+                            ("## Global-rule candidates", "GLOBAL RULE"),
+                            ("## Project-specific improvements", "PROJECT")):
+        group = [f for f in candidates + watch if _dest_matches(f, needle)]
         lines.append(section)
         lines.append("")
         if group:
             for finding in group:
-                lines.extend(_finding_block(finding))
+                title = finding.get("title", finding["signal_type"])
+                lines.append(f"- {title} `[{finding.get('id', '?')}]` "
+                             "(full block under High-confidence improvements / watch list)")
         else:
             lines.append("None in this period.")
-            lines.append("")
+        lines.append("")
+    lines.extend(_destination_index(candidates + watch))
     lines.append("## Successful patterns worth preserving")
     lines.append("")
     successes = [f for f in candidates + watch if f["signal_type"] == "success_pattern"]
     if successes:
+        # Title-only cross-references: full blocks already rendered above.
         for finding in successes:
-            lines.extend(_finding_block(finding))
+            title = finding.get("title", finding["signal_type"])
+            lines.append(f"- {title} `[{finding.get('id', '?')}]`")
+        lines.append("")
     else:
         lines.append("None detected in this period.")
         lines.append("")

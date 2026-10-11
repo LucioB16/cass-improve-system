@@ -24,13 +24,22 @@ _STOPWORDS = frozenset({
     "there", "their", "about", "into", "could", "should", "just",
 })
 
+TYPE_TITLES = {
+    "user_correction": "Repeated user corrections",
+    "error_mention": "Recurring errors",
+    "retry_loop": "Debugging loops / retries",
+    "manual_procedure": "Repeated manual procedures",
+    "rediscovery": "Duplicated research / rediscovery",
+    "success_pattern": "Successful reusable patterns",
+}
+
 DESTINATIONS = {
-    "user_correction": "PROJECT RULE or GLOBAL RULE (if cross-project)",
-    "error_mention": "TOOLING GAP or PROJECT KNOWLEDGE",
-    "retry_loop": "AUTOMATION or EXISTING SKILL improvement",
-    "manual_procedure": "AUTOMATION or NEW SKILL",
-    "rediscovery": "PROJECT KNOWLEDGE or NEW SKILL",
-    "success_pattern": "PRESERVE (document as reusable pattern)",
+    "user_correction": ["PROJECT RULE", "GLOBAL RULE (if cross-project)"],
+    "error_mention": ["TOOLING GAP", "PROJECT KNOWLEDGE"],
+    "retry_loop": ["AUTOMATION", "EXISTING SKILL improvement"],
+    "manual_procedure": ["AUTOMATION", "NEW SKILL"],
+    "rediscovery": ["PROJECT KNOWLEDGE", "NEW SKILL"],
+    "success_pattern": ["PRESERVE (document as reusable pattern)"],
 }
 
 
@@ -91,11 +100,15 @@ def analyze(normalized: dict) -> dict:
                     "excerpt": signal.get("excerpt", "")[:300],
                 })
     candidates, watch, ignored = [], [], []
-    for (stype, _), bucket in clusters.items():
+    for (stype, fp), bucket in clusters.items():
         n_sessions = len(bucket["session_ids"])
         n_projects = len(bucket["workspaces"])
         conf = confidence(n_sessions, n_projects, bucket["occurrences"], stype)
+        first_words = " ".join(bucket["excerpts"][0]["excerpt"].split()[:8]) \
+            if bucket["excerpts"] else ""
         finding = {
+            "id": f"{stype}:{fp[:8]}",
+            "title": f"{TYPE_TITLES.get(stype, stype)} — {first_words}".rstrip(" —"),
             "signal_type": stype,
             "occurrences": bucket["occurrences"],
             "session_count": n_sessions,
@@ -103,7 +116,7 @@ def analyze(normalized: dict) -> dict:
             "agents": sorted(bucket["agents"]),
             "cross_project": n_projects >= 2,
             "confidence": conf,
-            "suggested_destination": DESTINATIONS.get(stype, "EPHEMERAL"),
+            "destinations": DESTINATIONS.get(stype, ["EPHEMERAL"]),
             "evidence": bucket["excerpts"],
         }
         if conf == "high":

@@ -391,7 +391,17 @@ class AnalyzeTest(unittest.TestCase):
         findings = analyze.analyze(load_fixture("normalized_multi.json"))
         cand = next(c for c in findings["candidates"]
                     if c["signal_type"] == "user_correction")
-        self.assertIn("GLOBAL RULE", cand["suggested_destination"])
+        self.assertIn("GLOBAL RULE (if cross-project)", cand["destinations"])
+
+    def test_finding_identity_stable(self):
+        first = analyze.analyze(load_fixture("normalized_multi.json"))
+        second = analyze.analyze(load_fixture("normalized_multi.json"))
+        ids1 = sorted(c["id"] for c in first["candidates"])
+        ids2 = sorted(c["id"] for c in second["candidates"])
+        self.assertEqual(ids1, ids2)
+        self.assertTrue(all(":" in i for i in ids1))
+        titles = [c["title"] for c in first["candidates"]]
+        self.assertTrue(all(t for t in titles))
 
     def test_total_occurrences_preserved(self):
         norm = load_fixture("normalized_multi.json")
@@ -401,6 +411,99 @@ class AnalyzeTest(unittest.TestCase):
                   (findings["candidates"], findings["watch_list"],
                    findings["ignored_single_occurrences"]) for c in group)
         self.assertEqual(got, expected)
+
+
+class MultilingualTest(unittest.TestCase):
+    def _types(self, role, text):
+        return {s["type"] for s in normalize_cass.extract_signals(role, text, "t#0")}
+
+    def test_english_preserved(self):
+        self.assertIn("user_correction", self._types("user", "No, that's wrong, try again"))
+        self.assertIn("retry_loop", self._types("user", "still failing, same error"))
+        self.assertIn("manual_procedure", self._types("user", "I manually copy this every time"))
+        self.assertIn("success_pattern", self._types("user", "perfect, thanks, that worked"))
+
+    def test_spanish_corrections(self):
+        for text in ("NO pases todavía, primero terminá eso",
+                     "vos antes me habías dicho otra cosa",
+                     "por qué interrumpiste tu trabajo?",
+                     "Recordá que este proyecto ya tiene un skill local",
+                     "eso no es lo que te pedí",
+                     "te equivocaste de archivo",
+                     "no era eso lo que necesitaba",
+                     "acordate de usar el entorno correcto"):
+            with self.subTest(text=text):
+                self.assertIn("user_correction", self._types("user", text))
+
+    def test_spanish_correction_accent_variants(self):
+        accented = self._types("user", "Recordá que el deploy es manual")
+        plain = self._types("user", "Recorda que el deploy es manual")
+        self.assertIn("user_correction", accented)
+        self.assertIn("user_correction", plain)
+
+    def test_spanish_retry_manual_rediscovery_success(self):
+        self.assertIn("retry_loop", self._types("user", "sigue sin funcionar"))
+        self.assertIn("retry_loop", self._types("user", "el mismo error otra vez"))
+        self.assertIn("manual_procedure", self._types("user", "tengo que hacerlo a mano cada vez"))
+        self.assertIn("rediscovery", self._types("user", "cómo configuro la salida?"))
+        self.assertIn("rediscovery", self._types("user", "cuál es el comando correcto?"))
+        self.assertIn("success_pattern", self._types("user", "perfecto, funcionó"))
+        self.assertIn("success_pattern", self._types("user", "era justo lo que quería"))
+        self.assertIn("error_mention", self._types("user", "el deploy falló con error"))
+
+    def test_spanish_negatives(self):
+        for text in ("no sé qué pasó acá",
+                     "noticias del día de hoy",
+                     "revisá el manual de usuario",
+                     "anotado en la libreta",
+                     "terror en el cine"):
+            with self.subTest(text=text):
+                found = self._types("user", text)
+                self.assertNotIn("user_correction", found)
+                self.assertNotIn("retry_loop", found)
+                self.assertNotIn("manual_procedure", found)
+
+    def test_correction_requires_user_role(self):
+        self.assertNotIn("user_correction",
+                         self._types("assistant", "eso no es lo que te pedí"))
+
+
+class RoleTest(unittest.TestCase):
+    def test_explicit_roles_pass_through(self):
+        self.assertEqual(normalize_cass.infer_role({"role": "user"}), "user")
+        self.assertEqual(normalize_cass.infer_role({"role": "assistant"}), "assistant")
+        self.assertEqual(normalize_cass.infer_role({"role": "human"}), "user")
+        self.assertEqual(normalize_cass.infer_role({"role": "system"}), "system")
+
+    def test_antigravity_mapping(self):
+        self.assertEqual(normalize_cass.infer_role(
+            {"source": "USER_EXPLICIT", "type": "USER_INPUT"}), "user")
+        self.assertEqual(normalize_cass.infer_role(
+            {"source": "MODEL", "type": "PLANNER_RESPONSE"}), "assistant")
+
+    def test_unknown_stays_unknown(self):
+        self.assertEqual(normalize_cass.infer_role({}), "?")
+        self.assertEqual(normalize_cass.infer_role({"role": "?"}), "?")
+        self.assertEqual(normalize_cass.infer_role({"source": "SOMETHING_NEW"}), "?")
+        self.assertEqual(normalize_cass.infer_role({"type": "FUTURE_KIND"}), "?")
+
+    def test_antigravity_fixture_normalizes_roles(self):
+        fixture = load_fixture("antigravity_export.json")
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "ag-transcript", "agent": "antigravity",
+                             "workspace": "?", "source_id": "local"}]}
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(fixture, False)):
+            out = normalize_cass.normalize_inventory(inv)
+        session = out["sessions"][0]
+        roles = [m["role"] for m in session["messages"]]
+        self.assertIn("user", roles)
+        self.assertIn("assistant", roles)
+        self.assertNotIn("?", roles)
+        user_signals = [s for s in session["signals"]
+                        if s["type"] == "user_correction"]
+        self.assertTrue(user_signals)
+        self.assertTrue(all("#msg" in s["ref"] for s in user_signals))
 
 
 class ReportTest(unittest.TestCase):
@@ -430,6 +533,156 @@ class ReportTest(unittest.TestCase):
         # excerpts entering the report must already be redacted upstream
         raw = json.dumps(findings)
         self.assertNotIn("ghp_", normalize_cass.redact(raw))
+
+
+class LongSessionTest(unittest.TestCase):
+    def _big_export(self, n=200, late_correction_at=190):
+        messages = []
+        for i in range(n):
+            if i == late_correction_at:
+                messages.append({"role": "user",
+                                 "content": "no, eso no es lo que te pedí, empezá de nuevo"})
+            elif i == late_correction_at + 2:
+                messages.append({"role": "assistant",
+                                 "content": "failed again with the same error, retrying"})
+            elif i % 2:
+                messages.append({"role": "assistant", "content": f"routine output {i}"})
+            else:
+                messages.append({"role": "user", "content": f"ok continúa {i}"})
+        return messages
+
+    def test_late_correction_detected_with_bounded_retention(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "big", "agent": "codex",
+                             "workspace": "w", "source_id": "local"}]}
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(self._big_export(), False)):
+            out = normalize_cass.normalize_inventory(inv)
+        session = out["sessions"][0]
+        meta = session["metadata"]
+        self.assertEqual(meta["total_messages"], 200)
+        self.assertLessEqual(len(session["messages"]), 120)
+        self.assertEqual(meta["sampling"], "stratified: signal-bearing + user turns first, then head/tail")
+        corrections = [s for s in session["signals"] if s["type"] == "user_correction"]
+        self.assertTrue(any(s["ref"] == "big#msg190" for s in corrections))
+        retries = [s for s in session["signals"] if s["type"] == "retry_loop"]
+        self.assertTrue(any(s["ref"] == "big#msg192" for s in retries))
+
+    def test_selection_deterministic_and_user_biased(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "big", "agent": "codex",
+                             "workspace": "w", "source_id": "local"}]}
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(self._big_export(), False)):
+            first = normalize_cass.normalize_inventory(inv)["sessions"][0]
+            second = normalize_cass.normalize_inventory(inv)["sessions"][0]
+        roles1 = [m["role"] for m in first["messages"]]
+        roles2 = [m["role"] for m in second["messages"]]
+        self.assertEqual(roles1, roles2)
+        self.assertGreater(roles1.count("user"), roles1.count("assistant") // 2)
+
+    def test_short_session_keeps_everything(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "small", "agent": "codex",
+                             "workspace": "w", "source_id": "local"}]}
+        messages = [{"role": "user", "content": "hola"} for _ in range(10)]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            out = normalize_cass.normalize_inventory(inv)["sessions"][0]
+        self.assertEqual(len(out["messages"]), 10)
+        self.assertEqual(out["metadata"]["sampling"], "none")
+        self.assertFalse(out["metadata"]["truncated"])
+
+
+class PeriodFidelityTest(unittest.TestCase):
+    def test_resolve_relative_bounds(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+        start = collect_sessions.resolve_bound("-7d", is_end=False, now=now)
+        self.assertEqual(start, "2026-10-03T12:00:00+00:00")
+        self.assertIsNone(collect_sessions.resolve_bound("nonsense!!", is_end=False, now=now))
+
+    def test_explicit_range_bounds(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            collect_sessions.resolve_bound("2026-10-01", is_end=False, now=now),
+            "2026-10-01T00:00:00+00:00")
+        self.assertEqual(
+            collect_sessions.resolve_bound("2026-10-06", is_end=True, now=now),
+            "2026-10-06T23:59:59.999999+00:00")
+
+    def test_stale_conversation_flagged_not_dropped(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "old", "agent": "codex", "workspace": "w",
+                             "source_id": "local",
+                             "_period_start": "2026-10-03T00:00:00+00:00",
+                             "_period_end": "2026-10-10T23:59:59+00:00"}]}
+        messages = [{"role": "user", "content": "hola",
+                     "created_at": "2026-08-15T10:00:00Z"}]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            out = normalize_cass.normalize_inventory(inv)
+        session = out["sessions"][0]
+        self.assertTrue(session["metadata"]["out_of_period"])
+        self.assertEqual(session["metadata"]["timestamps"], "messages")
+        self.assertEqual(out["coverage"]["sessions_analyzed"], 1)
+        self.assertEqual(out["coverage"]["sessions_outside_period"], 1)
+
+    def test_genuinely_recent_session(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "new", "agent": "codex", "workspace": "w",
+                             "source_id": "local",
+                             "_period_start": "2026-10-03T00:00:00+00:00",
+                             "_period_end": "2026-10-10T23:59:59+00:00"}]}
+        messages = [{"role": "user", "content": "hola",
+                     "created_at": "2026-10-05T10:00:00Z"}]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            out = normalize_cass.normalize_inventory(inv)
+        self.assertFalse(out["sessions"][0]["metadata"]["out_of_period"])
+
+    def test_missing_timestamps_never_excluded(self):
+        inv = {"period": {}, "coverage": {},
+               "sessions": [{"path": "myst", "agent": "codex", "workspace": "w",
+                             "source_id": "local",
+                             "_period_start": "2026-10-03T00:00:00+00:00",
+                             "_period_end": "2026-10-10T23:59:59+00:00"}]}
+        messages = [{"role": "user", "content": "hola sin tiempo"}]
+        with mock.patch.object(normalize_cass, "export_session",
+                               return_value=(messages, False)):
+            out = normalize_cass.normalize_inventory(inv)
+        session = out["sessions"][0]
+        self.assertFalse(session["metadata"]["out_of_period"])
+        self.assertEqual(session["metadata"]["timestamps"], "none")
+        self.assertEqual(out["coverage"]["sessions_timestamp_unknown"], 1)
+        self.assertEqual(out["coverage"]["sessions_analyzed"], 1)
+
+
+class DedupTest(unittest.TestCase):
+    def test_evidence_block_rendered_once(self):
+        findings = analyze.analyze(load_fixture("normalized_multi.json"))
+        text = report.render(findings)
+        self.assertEqual(text.count("sess-aaa#msg1"), 1)
+        self.assertEqual(text.count("sess-bbb#msg1"), 1)
+
+    def test_destinations_coexist_without_cloning(self):
+        findings = {"period": {"label": "t"}, "coverage": {},
+                    "candidates": [{"id": "manual_procedure:abc123",
+                                    "title": "Repeated manual procedures",
+                                    "signal_type": "manual_procedure",
+                                    "occurrences": 4, "session_count": 3,
+                                    "project_count": 2, "agents": ["codex"],
+                                    "cross_project": True, "confidence": "high",
+                                    "destinations": ["AUTOMATION", "NEW SKILL"],
+                                    "evidence": [{"ref": "s#9",
+                                                  "excerpt": "copy config by hand"}]}],
+                    "watch_list": [], "ignored_single_occurrences": []}
+        text = report.render(findings)
+        self.assertEqual(text.count("copy config by hand"), 1)
+        self.assertIn("## Automation candidates", text)
+        self.assertIn("## New skill candidates", text)
+        self.assertIn("Destinations: AUTOMATION, NEW SKILL", text)
 
 
 class ReadOnlyTest(unittest.TestCase):

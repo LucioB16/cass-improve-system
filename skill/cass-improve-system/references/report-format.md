@@ -15,25 +15,27 @@ Coverage
 ## Executive summary
 
 ## High-confidence improvements
-### <candidate>
+### <title> [`<type:fp>`]
 Type:
-Destination:
+Destinations:
 Evidence:
 Why it matters:
 Proposed improvement:
 Confidence:
 
-## Automation candidates
+## Automation candidates        (title-only cross-references)
 
-## New skill candidates
+## New skill candidates          (title-only cross-references)
 
-## Existing skill improvements
+## Existing skill improvements   (title-only cross-references)
 
-## Global-rule candidates
+## Global-rule candidates        (title-only cross-references)
 
-## Project-specific improvements
+## Project-specific improvements (title-only cross-references)
 
-## Successful patterns worth preserving
+## Index by destination          (title-only cross-references)
+
+## Successful patterns worth preserving  (title-only cross-references)
 
 ## Low-confidence / watch list
 
@@ -41,6 +43,12 @@ Confidence:
 
 ## Coverage limitations
 ```
+
+Principles: each finding carries a stable `id` and a `destinations` list
+and is rendered in full exactly once; category sections cross-reference by
+title + id without repeating evidence. Coverage also reports sessions
+outside the requested period (kept, flagged), sessions without usable
+timestamps, recovered exports, and sampling/truncation metadata.
 
 Principles: traceable evidence references (session ref + short excerpt),
 never full transcript dumps; sort by expected value × confidence; state
