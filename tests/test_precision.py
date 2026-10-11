@@ -95,7 +95,7 @@ class ToolOutputNoiseTest(unittest.TestCase):
         for finding in errors:
             self.assertEqual(finding["confidence"], "low")
 
-    def test_genuine_recurring_build_failure_retained(self):
+    def test_genuine_recurring_build_failure_retained_not_promoted(self):
         sessions = []
         for i, workspace in enumerate(("projA", "projB", "projC")):
             sessions.append((f"s{i}", workspace, [
@@ -103,7 +103,20 @@ class ToolOutputNoiseTest(unittest.TestCase):
             ]))
         findings, _ = run_pipeline(sessions)
         errors = finding_types(findings).get("error_mention", [])
+        # Retained as evidence, but pure tool repetition never promotes.
         self.assertTrue(errors)
+        for finding in errors:
+            self.assertEqual(finding["confidence"], "low")
+
+    def test_recurring_failure_with_user_report_promotes(self):
+        sessions = []
+        for i, workspace in enumerate(("projA", "projB", "projC")):
+            sessions.append((f"s{i}", workspace, [
+                ("user", "sigue fallando el auth con timeout"),
+                ("assistant", "[Tool Output]\nFAILED: auth_test.go:42 timeout"),
+            ]))
+        findings, _ = run_pipeline(sessions)
+        errors = finding_types(findings).get("error_mention", [])
         self.assertTrue(any(f["confidence"] == "medium" for f in errors))
 
     def test_user_report_plus_tool_confirmation(self):
@@ -187,6 +200,26 @@ class ErrorContextTest(unittest.TestCase):
             ("assistant", "[Tool Output]\nFAILED: auth_test.go:42 timeout"),
         ])])
         self.assertTrue(finding_types(findings).get("error_mention", []))
+
+
+    def test_template_repetition_capped(self):
+        template = ("You are auditing a documentation repository for FACTUAL "
+                    "ERRORS. Read-only. Do not modify files. " + "x" * 200)
+        findings, _ = run_pipeline([
+            ("s1", "projA", [("user", template)]),
+            ("s2", "projB", [("user", template)]),
+            ("s3", "projC", [("user", template)]),
+        ])
+        for group in (findings["candidates"], findings["watch_list"]):
+            self.assertEqual(group, [])
+
+    def test_short_habitual_repetition_exempt(self):
+        findings, _ = run_pipeline([
+            ("s1", "projA", [("user", "no, eso no es lo que te pedí")]),
+            ("s2", "projB", [("user", "no, eso no es lo que te pedí")]),
+        ])
+        corrections = finding_types(findings).get("user_correction", [])
+        self.assertTrue(any(f["confidence"] == "medium" for f in corrections))
 
 
 class SpanishPairsTest(unittest.TestCase):

@@ -54,22 +54,28 @@ def fingerprint(text: str) -> str:
 
 
 def confidence(n_sessions: int, n_projects: int, occurrences: int,
-               stype: str, has_user_evidence: bool) -> str:
+               stype: str, has_user_evidence: bool,
+               corroborated: bool = False, templated: bool = False) -> str:
     """Provenance-aware confidence.
 
     User-backed findings use the standard thresholds. Findings with no
-    user-authored evidence are capped: systemic spread (3+ sessions across
-    2+ projects, e.g. a genuine recurring tool failure) can reach medium,
-    but nothing tool/assistant-only ever reaches high, and file-echo-only
-    noise stays low.
+    user-authored evidence are capped: only systemic spread (3+ sessions
+    across 2+ projects) WITH user corroboration in a member session
+    (a user error/correction/retry report alongside the tool evidence)
+    reaches medium; pure echoed/diagnostic repetition stays low.
+    Byte-identical LONG excerpts repeated across sessions (pasted
+    templates, echoed files) cap at low; short habitual utterances are
+    exempt from the template rule.
     """
+    if templated:
+        return "low"
     if has_user_evidence:
         if n_sessions >= 3 and n_projects >= 2:
             return "high"
         if n_sessions >= 2 or (stype == "user_correction" and occurrences >= 2):
             return "medium"
         return "low"
-    if n_sessions >= 3 and n_projects >= 2:
+    if corroborated and n_sessions >= 3 and n_projects >= 2:
         return "medium"
     return "low"
 
@@ -117,6 +123,15 @@ def synthesize_session_retries(sessions: list[dict]) -> int:
 def analyze(normalized: dict) -> dict:
     sessions = normalized.get("sessions", [])
     synthesize_session_retries(sessions)
+    # Sessions carrying user-authored error/correction/retry reports, for
+    # corroborating tool-evidence clusters found in the same session.
+    session_user_reports: dict[str, bool] = {}
+    for session in sessions:
+        sid = session.get("session_id", "?")
+        session_user_reports[sid] = any(
+            s.get("prov") == "user_text" and s.get("type") in
+            ("error_mention", "user_correction", "retry_loop")
+            for s in session.get("signals", []))
     clusters: dict[tuple[str, str], dict] = {}
     for session in sessions:
         sid = session.get("session_id", "?")
@@ -137,6 +152,8 @@ def analyze(normalized: dict) -> dict:
                 "user_in": 0,
                 "pre_window": 0,
                 "unknown_time": 0,
+                "distinct_excerpts": set(),
+                "corroborated": False,
                 "excerpts": [],
             })
             period = signal.get("period", "unbounded")
@@ -164,6 +181,9 @@ def analyze(normalized: dict) -> dict:
                     "ref": signal.get("ref", sid),
                     "excerpt": signal.get("excerpt", "")[:300],
                 })
+            bucket["distinct_excerpts"].add(signal.get("excerpt", ""))
+            if session_user_reports.get(sid):
+                bucket["corroborated"] = True
     candidates, watch, ignored = [], [], []
     for (stype, fp), bucket in clusters.items():
         if bucket["bounded"]:
@@ -178,7 +198,12 @@ def analyze(normalized: dict) -> dict:
             occ_in = bucket["occurrences"]
         has_user = (bucket["prov_counts"].get("user_text", 0) > 0
                     and bucket["user_in"] > 0)
-        conf = confidence(n_sessions, n_projects, occ_in, stype, has_user)
+        templated = (len(bucket["distinct_excerpts"]) <= 1
+                     and len(bucket["session_ids"]) >= 2
+                     and max((len(e) for e in bucket["distinct_excerpts"]),
+                             default=0) > 120)
+        conf = confidence(n_sessions, n_projects, occ_in, stype, has_user,
+                          bucket["corroborated"], templated)
         first_words = " ".join(bucket["excerpts"][0]["excerpt"].split()[:8]) \
             if bucket["excerpts"] else ""
         finding = {
