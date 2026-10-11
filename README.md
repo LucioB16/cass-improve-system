@@ -1,11 +1,20 @@
 # cass-improve-system
 
+<p align="center">
+  <img src="assets/cass-improve-system-icon.png" alt="cass-improve-system icon" width="140" />
+</p>
+
+<p align="center">
+  <strong>Turn a week of scattered coding-agent sessions into concrete improvements.</strong>
+</p>
+
+<p align="center">
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![GitHub issues](https://img.shields.io/github/issues/LucioB16/cass-improve-system)](https://github.com/LucioB16/cass-improve-system/issues)
 [![GitHub last commit](https://img.shields.io/github/last-commit/LucioB16/cass-improve-system)](https://github.com/LucioB16/cass-improve-system/commits/main)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/LucioB16/cass-improve-system/pulls)
+</p>
 
-**Turn a week of scattered coding-agent sessions into concrete improvements.**
 A portable agent skill for **batch retrospective analysis** across all your
 coding-agent history — repeated mistakes, user corrections, automation
 candidates, skill ideas, and reusable patterns, all with traceable evidence.
@@ -297,3 +306,10 @@ https://github.com/Dicklesworthstone/coding_agent_session_search/issues/519
 
 MIT — see [LICENSE](LICENSE). CASS is a separate project with its own
 license/terms; this project is not affiliated with or endorsed by CASS upstream.
+
+## Assets
+
+- `assets/cass-improve-system-icon.png` — project icon shown in the header above.
+- GitHub has no native "repository icon"; if you want a visual social
+  preview, upload this same image manually under the repository's
+  Settings → General → Social preview.
