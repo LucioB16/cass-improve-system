@@ -807,3 +807,44 @@ Driven by the real 30-day v1.4.0 retrospective (207 sessions, 3 harnesses,
   (never default unbounded for bounded corpora); numeric original-index
   ordering for source selection (msg100 > msg10 > msg9); per-case
   regression tests; E2E re-validation; no release.
+
+---
+
+# Phase 23 — Copilot App live validation (second machine, unpushed)
+
+The `fix/copilot-app-compatibility` branch (implementation `5905567`,
+docs `ea452a9`) was validated live against real Copilot App history on a
+second Windows PC (Copilot CLI 1.0.94-3, CASS 0.10.0). Not merged,
+not pushed, no release.
+
+- [x] Restore the branch offline from the transfer bundle and verify
+  commits, integrity (`fsck`, `bundle verify`), and clean tree.
+- [x] Deterministic suite green on the second machine (187/187).
+- [x] Real `events.jsonl` vs CASS export vs `normalize_cass` comparison:
+  user/assistant roles and text correct, tool role never user,
+  timestamps/ordering/refs stable, redaction clean, honest `partial`
+  coverage with counts.
+- [x] Filtering: `copilot_cli` UNION inventory (sessions ⊇ timeline here),
+  multi-agent, workspace, combined, time ranges, capped → UNVERIFIED;
+  zero duplicates; no silent omissions.
+- [x] Stock 7d `copilot_cli` retrospective end-to-end (Preflight →
+  Inventory → Normalize → Aggregate → Report), all exit 0: 39/39
+  analyzed, honest no-findings/medium-only report with coverage limits.
+- [x] Genuine defect found live: real tool outputs nest under
+  `data.result={content, detailedContent}` while fixtures only covered
+  flat `output` — all Copilot tool excerpts decoded empty, so
+  `tool_result` signals could never fire. Fixed with a minimal
+  `_text_from_value` dict fallback (`text` → `content` →
+  `detailedContent`); opaque dicts still yield "".
+- [x] Regression tests mirroring the live shape (nested content,
+  detailed-only fallback, opaque-dict negative, tool-error promotes a
+  `tool_result` `error_mention` without `user_correction`).
+- [x] Full suite green after the fix (191/191); live revalidation:
+  tool excerpts 0/254 → 523/659, `tool_result` signals 0 → 609,
+  2 new medium watch-list items (cross-project recurring tool errors,
+  correctly capped); user/assistant decoding unchanged.
+- [x] Docs updated (`docs/testing.md` Copilot sections); no CASS changes;
+  no session files modified; no private content committed.
+- [ ] Native Copilot App invocation retest (pending user approval to
+  refresh the global Skill first).
+- [ ] Merge / release decision (requires explicit approval; needs push).

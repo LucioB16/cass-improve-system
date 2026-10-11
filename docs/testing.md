@@ -55,6 +55,14 @@ exercise using the real wrappers; no private CASS history required.
   events → tool, session/system/turn lifecycle → system), extracts nested
   `data.content` (plus `payload.content`, tool result/output/summary),
   and never dumps whole envelopes as messages.
+- Tool outputs arrive nested (`data.result={content, detailedContent}`,
+  verified live on Copilot CLI 1.0.94-3 exports): `_text_from_value`
+  reads `text`, then `content`, then `detailedContent` from content-shaped
+  dicts, so real tool output is preserved with `tool_result` provenance
+  (enabling `error_mention` signals from tool output) instead of decoding
+  to empty excerpts. Opaque dicts without those keys still yield "".
+  The user's original `content` is always preferred over the much longer
+  `transformedContent` (which embeds injected context).
 - Semantic coverage per session (full/partial/none/empty) counts
   interpretable, unknown-role, and missing-content events; control-only
   sessions are `empty`, not failures; reports warn explicitly when
@@ -68,6 +76,37 @@ exercise using the real wrappers; no private CASS history required.
 - No local Copilot sessions exist on the validation machine
   (`~/.copilot/session-state` absent), so live-history Copilot E2E awaits
   independent retest; deterministic fixtures prove detection mechanics.
+
+## Copilot App live validation (second machine, 2026-10-11)
+
+Environment: Windows 11, Copilot CLI 1.0.94-3, CASS 0.10.0 healthy
+(48 903 documents), 645 Copilot session directories on disk.
+
+- 7d inventory: 39 sessions via `sessions`, 26 via `timeline`
+  (sessions ⊇ timeline here; the reverse was observed for opencode on the
+  first machine) — the UNION keeps all 39 with zero duplicates.
+  Scoped `--agent copilot_cli` inventory reports COMPLETE; capped or
+  client-filtered runs report UNVERIFIED, never false COMPLETE.
+- `cass export` round-trips raw events 1:1 with `events.jsonl`
+  (19/19, 179/179, 1597/1597, exit 0, no WAL recovery needed).
+  No top-level `role`/`content`; payloads nested under `data.content`;
+  timestamps monotonic and message-derived.
+- Real `assistant.message` events carry `toolRequests` plus optional
+  `reasoningText` (dropped uniformly, as for all vendors); empty-content
+  tool-call turns count toward `missing_content` honestly.
+- Real `tool.execution_complete` events carry
+  `result={content, detailedContent}` — the flat-`output` fixture did not
+  mirror this, so all tool excerpts decoded empty until the
+  `_text_from_value` fallback fix (regression tests added).
+- Stock 7d retrospective (`copilot_cli`, COMPLETE): 39/39 analyzed,
+  0 skipped; user excerpts 516/528 non-empty, assistant 326/390;
+  tool excerpts 0/254 before the fix → 523/659 after; `tool_result`
+  signals 0 → 609; `error_mention` 266 → 875. Findings: 0 high,
+  2 medium watch-list items (cross-project recurring tool errors with
+  in-window evidence, correctly capped at medium as non-user evidence),
+  remainder do-not-promote singles. Report states 39/39 partial with an
+  explicit coverage limitation — a no-findings report never masquerades
+  as a verified-empty corpus.
 
 ## End-to-end validation (live CASS 0.10.0, Phase 22 corrective build, 30-day corpus)
 

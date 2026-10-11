@@ -165,6 +165,29 @@ class CopilotContentTest(unittest.TestCase):
                "data": {"toolCallId": "t1", "output": "FAILED: x"}}
         self.assertEqual(normalize_cass.extract_text(msg), "FAILED: x")
 
+    def test_nested_tool_result_content(self):
+        # Live Copilot shape: data.result={content, detailedContent}.
+        msg = {"type": "tool.execution_complete",
+               "data": {"toolCallId": "t1", "model": "m",
+                        "result": {"content": "FAILED: timeout at step 3",
+                                   "detailedContent": "traceback lines..."},
+                        "success": False},
+               "timestamp": "2026-10-10T10:02:09.000Z"}
+        self.assertEqual(normalize_cass.extract_text(msg),
+                         "FAILED: timeout at step 3")
+
+    def test_nested_tool_result_detailed_fallback(self):
+        msg = {"type": "tool.execution_complete",
+               "data": {"toolCallId": "t1",
+                        "result": {"detailedContent": "only details here"}}}
+        self.assertEqual(normalize_cass.extract_text(msg),
+                         "only details here")
+
+    def test_opaque_result_dict_stays_empty(self):
+        msg = {"type": "tool.execution_complete",
+               "data": {"toolCallId": "t1", "result": {"exitCode": 1}}}
+        self.assertEqual(normalize_cass.extract_text(msg), "")
+
     def test_no_envelope_dump(self):
         msg = {"type": "weird.kind",
                "data": {"blob": {"a": 1}, "content": None},
@@ -239,6 +262,29 @@ class CopilotSignalsTest(unittest.TestCase):
         self.assertTrue(by_type.get("manual_procedure", []))
         manual = by_type["manual_procedure"][0]
         self.assertIn("user_text", manual["provenance"])
+
+    def test_tool_error_promotes_tool_result_signal(self):
+        # Live shape carries output nested under data.result.content; the
+        # failure text must surface as a tool_result error signal, never as
+        # user-authored content.
+        entry, messages = copilot_session(events=[
+            {"type": "user.message",
+             "data": {"content": "run the checks"},
+             "timestamp": "2026-10-10T10:01:00.000Z"},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1",
+                      "result": {"content": "FAILED: timeout at step 3",
+                                 "detailedContent": "Traceback (most recent call last): ..."},
+                      "success": False},
+             "timestamp": "2026-10-10T10:02:00.000Z"},
+        ])
+        findings, norm = run_pipeline([(entry, messages)])
+        by_type = finding_types(findings)
+        errors = by_type.get("error_mention", [])
+        self.assertTrue(errors)
+        self.assertTrue(
+            any("tool_result" in e.get("provenance", []) for e in errors))
+        self.assertFalse(by_type.get("user_correction", []))
 
     def test_tool_phrase_not_user_correction(self):
         entry, messages = copilot_session(events=[

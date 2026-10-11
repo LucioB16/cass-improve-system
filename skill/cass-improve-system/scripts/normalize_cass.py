@@ -365,15 +365,21 @@ MAX_CHARS_PER_EVENT = 4000
 def _text_from_value(value: object) -> str:
     """Extract human text from a content-shaped value. Strings pass through;
     lists join their text parts (e.g. [{"type": "text", "text": "..."}]);
-    anything else yields "" rather than a JSON dump of an opaque envelope."""
+    dicts try `text`, then Copilot Chronicle `content` / `detailedContent`
+    (verified live: tool.execution_complete carries
+    data.result={content, detailedContent}); anything else yields "" rather
+    than a JSON dump of an opaque envelope."""
     if isinstance(value, str):
         return value
     if isinstance(value, list):
         parts = [_text_from_value(item) for item in value]
         return "\n".join(p for p in parts if p.strip())
     if isinstance(value, dict):
-        text = value.get("text", "")
-        return text if isinstance(text, str) else ""
+        for key in ("text", "content", "detailedContent"):
+            text = value.get(key, "")
+            if isinstance(text, str) and text.strip():
+                return text
+        return ""
     return ""
 
 
