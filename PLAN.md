@@ -781,3 +781,24 @@ fidelity, dedup, Freebuff CLI compatibility). No release yet.
   WAL recovery, report-only, compat unchanged.
 - [x] Docs (provenance, eligibility, limits); full suite + CI green;
   atomic commits; push; tree clean.
+
+---
+
+# Phase 22 — Corpus integrity & period semantics (v1.5.0 candidate)
+
+Driven by the real 30-day v1.4.0 retrospective (207 sessions, 3 harnesses,
+24 workspaces). No release yet.
+
+- [x] P1 injected directives: structural-marker provenance (`injected_system`)
+  for directive-wrapped user-role messages; OH-MY-OPENCODE regression fixture.
+- [x] P2 signal period provenance (in/pre/post/unknown/unbounded) + promotion
+  counts in-window evidence only; historical corroboration display.
+- [x] P3 inventory cap: limit+1 detection, COMPLETE/CAPPED metadata + report
+  warning; default limit raised with justification, hard ceiling documented.
+- [x] P4 user-text strict error patterns (occurrence structures); task-text
+  negatives; genuine reports preserved.
+- [x] Precision fixture suite for all four classes.
+- [x] E2E stock 30d review vs baseline; directive FP gone; coverage explicit;
+  genuine finding still promotes from in-window evidence; WAL/report-only intact.
+- [x] Docs where behavior changed; full suite + CI green; atomic commits;
+  push; tree clean.

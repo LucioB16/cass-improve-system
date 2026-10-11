@@ -32,7 +32,23 @@ CI (`.github/workflows/ci.yml`, matrix windows/ubuntu/macos) runs the unit
 suite plus an isolated-HOME install → verify → reinstall → uninstall
 exercise using the real wrappers; no private CASS history required.
 
-## End-to-end validation (live CASS 0.10.0, Phase 20 build)
+## End-to-end validation (live CASS 0.10.0, Phase 22 build, 30-day corpus)
+
+- Stock 30d review via the reinstalled canonical skill: 207 discovered
+  (COMPLETE inventory, limit 1000), 207 analyzed, 0 skipped, 142
+  WAL-recovered; opencode 142 + codex 52 + antigravity 13; 24 workspaces.
+- The false high-confidence OH-MY-OPENCODE directive finding is gone
+  (directive → `injected_system`, zero user evidence).
+- 7 medium → 1 defensible medium (repeated user-authored request template);
+  template/file-echo clusters demoted to low via template cap +
+  corroboration rule.
+- Every signal carries period provenance (3363 in-window, 233 pre-window,
+  0 unknown); pre-window evidence displays as corroboration, never
+  promotes alone.
+- Spanish corrections live (23 signals incl. genuine cases); manual (22)
+  and retry (30) signals all user-authored.
+- WAL recovery, report-only behavior, and install/compat architecture
+  unchanged.
 
 - Stock 7d review via the reinstalled canonical skill: 13 discovered →
   13 analyzed, 0 skipped, 11 WAL-recovered (adapter unchanged and working);
