@@ -6,7 +6,7 @@
 python -m unittest discover -s tests -v
 ```
 
-147 tests, stdlib `unittest` only. Fixtures under `tests/fixtures/` cover
+232 tests, stdlib `unittest` only. Fixtures under `tests/fixtures/` cover
 multiple agents/projects/dates. CASS subprocesses are mocked; the suite
 never touches live session history.
 
@@ -37,11 +37,31 @@ lifecycle handling, malformed envelopes), nested content extraction
 states (full/partial/none/empty, control-only, malformed), timeline-based
 agent filtering (union semantics, UNVERIFIED fallback, workspace server
 flag), synthetic Copilot end-to-end (promotion, evidence refs, empty
-corpus).
+corpus), and repository-hygiene scanning of tracked files (see below).
 
 CI (`.github/workflows/ci.yml`, matrix windows/ubuntu/macos) runs the unit
 suite plus an isolated-HOME install → verify → reinstall → uninstall
 exercise using the real wrappers; no private CASS history required.
+
+## Repository hygiene (portable paths)
+
+Public documentation must stay portable, so `tests/test_repo_hygiene.py`
+fails the build if a machine-specific path returns to a tracked file.
+
+- Use `%USERPROFILE%\...` in copy-paste Windows commands, and
+  `C:\Users\<USERNAME>\...` when documenting a path shape. POSIX examples
+  use `$HOME/...` or `~/...`.
+- Historical validation logs keep the fact that a run happened on a real
+  Windows machine; only the local username is anonymized.
+- Canonical project URLs (`https://github.com/LucioB16/cass-improve-system`)
+  are legitimate project identity and are never flagged.
+- Local usernames, hostnames, and local project roots (e.g. a `D:\…`
+  workspace root) are denied. The scanner is a pure function over
+  text, reads the tracked tree via `git ls-files`, never depends on the
+  runner's username, and excludes only its own module so its synthetic
+  fixtures cannot self-match.
+- Generated review corpora, CASS indexes, and transcripts stay out of the
+  repository entirely (see `.gitignore`).
 
 ## Copilot Chronicle compatibility (synthetic + live-shape validation)
 
