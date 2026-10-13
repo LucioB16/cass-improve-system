@@ -117,20 +117,10 @@ is isolated in `skill/cass-improve-system/scripts/cass_adapter.py`.
   derived archive/index state and is classified as safe ingestion
   maintenance; the review itself stays read-only w.r.t. user data.
 
-- `export --include-tools` panics (exit 3221226505) on some DB-backed
-  sessions. The adapter falls back to plain `--format json` automatically.
-- Exporting sessions from a **live-mutating session DB** (e.g. opencode's
-  SQLite WAL while that agent is actively working) can crash spuriously with
-  `WAL frame salt mismatch` followed by a thread panic
-  (exit 3221226505) — on plain exports too, not just `--include-tools`.
-  Verified live: `cass export … -o <tmpfile>` still leaves a **complete,
-  parseable JSON file** behind despite the trailing panic. The adapter
-  therefore exports to a unique temp file, ignores stdout, and on nonzero
-  exit validates the file (must parse to a message list; missing, empty,
-  malformed, or error-envelope output is rejected and retried, then
-  reported as an honest coverage gap). Salvaged output is flagged
-  (`recovered_from_panic`) and counted in the report's Coverage
-  limitations. Temp files are always cleaned up.
+- `export --include-tools` can also fail nonzero (exit 3221226505) on some
+  DB-backed sessions. The adapter falls back to plain `--format json`
+  automatically.
+
 - `cass sessions` has `--since` but no `--until` on this version; the skill
   filters the end of the range client-side.
 - Copilot Chronicle exports are raw source events, not an upstream defect:
@@ -138,3 +128,91 @@ is isolated in `skill/cass-improve-system/scripts/cass_adapter.py`.
   behave the same way), and CASS's own connector code documents nested
   `data.content` handling — so the adapter normalizes them downstream and
   no upstream issue was filed.
+
+### Upstream issue #519 — Windows export teardown abort
+
+Upstream issue:
+<https://github.com/Dicklesworthstone/coding_agent_session_search/issues/519>
+(still open; its title names the reporter's initial
+`WAL frame salt mismatch` symptom, which upstream later established is not
+the cause).
+
+**What was observed at the time (also reproduced by this project on opencode
+sessions).** CASS 0.10.0 on Windows could successfully read an OpenCode
+conversation, write a complete JSON export, announce export success — and
+only then abort the process with `0xC0000409` (decimal 3221226505). The same
+abort was observed on plain exports, not only with `--include-tools`.
+
+**Root cause established upstream.** CASS accesses OpenCode SQLite through
+`franken-agent-detection` (FAD). FAD maintained its own small async/Asupersync
+runtime in thread-local storage, and that runtime survived until main-thread
+TLS destruction during Windows `LdrShutdownProcess`. By then Windows had
+already terminated the runtime's other threads, so the late teardown tried to
+join thread/runtime state that could no longer be joined correctly: Rust
+panicked in thread lifecycle cleanup with
+`threads should not terminate unexpectedly`, and a panic at that
+process-teardown stage aborts the process with `0xC0000409`.
+
+The `WAL frame salt mismatch` warning is an **unrelated SQLite diagnostic**.
+It may occur independently of the lifecycle failure and may still appear
+during otherwise successful exports. It is not the cause of the teardown
+panic, and neither is concurrent OpenCode writing.
+
+**Upstream fix status (verified 2026-10-13).** Fixed on upstream `main`;
+**not present in any official release** — the newest release is still
+`v0.10.0` (2026-10-02).
+
+- `4064d20824464edd007e562c559d8f96dbfb4e31` — pins
+  `franken-agent-detection = 0.3.10`, calls FAD's `shutdown_driver()` (early
+  shutdown of its SQLite bridge runtime) before CASS exits together with
+  CASS's other two runtime shutdowns, and improves cleanup semantics so all
+  shutdown calls are evaluated rather than letting an earlier failure or
+  timeout skip another runtime. The same commit hardens direct OpenCode
+  SQLite export selection: the requested database path and session ID must
+  match, and a same-ID session in another OpenCode store is never silently
+  substituted for the requested database.
+- `b8726266d35cdea00156a58b968dcc30971e70c9` — compilation fix for the
+  GH519 regression tests added by the commit above
+  (`MessageRole::Assistant` → `MessageRole::Agent`). This was a test-only
+  typo found during qualification, not part of the production bug.
+- Native-Windows qualification reported upstream after both commits: GH519
+  export regressions **8/8 PASS**, runtime shutdown tests **PASS**,
+  live-writer exports either produce complete output with exit 0 or a clean
+  read error with no published file, and no `0xC0000409` teardown abort.
+
+**Downstream behavior in this skill — unchanged.** Because no released CASS
+carries the fix yet, the defensive export recovery path stays enabled:
+export to a unique temporary `-o` file, capture the process status, and on
+nonzero exit still validate the file — accepting only structurally valid
+conversation output and rejecting missing, empty, malformed, or
+error-envelope output, with bounded retries before an honest coverage gap.
+Verified live: a complete, parseable JSON file can still be left behind
+despite the trailing panic. Salvaged output is flagged
+(`recovered_from_panic`) and surfaced in the report's Coverage limitations
+rather than hidden, and temp files are always cleaned up.
+
+The recovery path may be reevaluated only after all of the following: an
+official CASS release includes the GH519 production fix; this project
+qualifies that released binary on its supported Windows workflow; complete
+exports consistently exit 0; genuine read/output errors still fail cleanly;
+and a compatibility policy for older supported CASS versions is decided. No
+automatic removal is promised — a low-cost defensive path for older releases
+is reasonable to keep.
+
+### Separate upstream issue — zero-length WAL (FrankenSQLite, not #519)
+
+Do not conflate this with GH519. When a writer executes
+`PRAGMA wal_checkpoint(TRUNCATE)`, SQLite may temporarily leave the WAL at
+zero bytes; FrankenSQLite could interpret that transient state as corrupt or
+as recovery-in-progress, where SQLite treats it as an empty WAL with no
+frames. Upstream tracks this separately as FrankenSQLite `bd-yxqs9`, with a
+fix on FrankenSQLite `main`
+(`8cc4796da8c6b7735cfd1a5f5d9940188f02a7da`) plus SQLite-writer regression
+coverage. As of 2026-10-13 CASS `main` uses `frankensqlite = 0.4.9`, and no
+published FrankenSQLite release containing that fix has been verified as
+consumed by CASS — so this project claims nothing about it.
+
+Historically this was never the failure this project hit: our #519 exports
+produced **complete output files** before CASS aborted, whereas the
+zero-length-WAL bug produces a read refusal and no published export. It is
+noted here only to keep the two problems distinct.

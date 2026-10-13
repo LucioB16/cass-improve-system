@@ -390,7 +390,7 @@ def export_session(
     timeout_s: int = 120,
     retries: int = 3,
 ) -> tuple[list[dict], bool]:
-    """Export one session, tolerating the upstream WAL/panic race.
+    """Export one session, tolerating the upstream Windows teardown abort.
 
     Returns (messages, recovered). `recovered=True` means the payload was
     salvaged from a `-o` file left behind by a nonzero-exit export; the
@@ -402,8 +402,12 @@ def export_session(
     - Unique temp file per attempt (system temp dir; read-only w.r.t. all
       user/session data), always cleaned up.
     - Try `--include-tools` first, fall back to plain export.
-    - On nonzero exit, still validate the `-o` file: CASS 0.10.0 can write
-      a complete export and panic afterwards (WAL frame salt mismatch).
+    - On nonzero exit, still validate the `-o` file: CASS 0.10.0 on Windows
+      can write a complete export and then abort during process teardown
+      (upstream issue #519: the franken-agent-detection SQLite bridge
+      runtime is destroyed too late, after Windows has already terminated
+      its other threads). The accompanying `WAL frame salt mismatch`
+      warning is an unrelated SQLite diagnostic, not the cause.
     - Missing/malformed/empty/error-envelope output is rejected, never
       mistaken for success; after bounded retries the session raises
       CassError so it becomes an honest coverage gap.
