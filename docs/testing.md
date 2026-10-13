@@ -55,11 +55,15 @@ fails the build if a machine-specific path returns to a tracked file.
   Windows machine; only the local username is anonymized.
 - Canonical project URLs (`https://github.com/LucioB16/cass-improve-system`)
   are legitimate project identity and are never flagged.
-- Local usernames, hostnames, and local project roots (e.g. a `D:\…`
-  workspace root) are denied. The scanner is a pure function over
+- Concrete user-home paths and known machine-specific project roots (e.g. a
+  `D:\…` workspace root) are denied. The scanner is a pure function over
   text, reads the tracked tree via `git ls-files`, never depends on the
   runner's username, and excludes only its own module so its synthetic
   fixtures cannot self-match.
+- The audit additionally checks manually for known usernames and hostnames
+  and found no remaining tracked occurrences, but detecting an arbitrary
+  standalone username or hostname is not claimed by the automated guard —
+  only the path signatures above are enforced in CI.
 - Generated review corpora, CASS indexes, and transcripts stay out of the
   repository entirely (see `.gitignore`).
 
