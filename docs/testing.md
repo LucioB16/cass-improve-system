@@ -88,7 +88,7 @@ Environment: Windows 11, Copilot CLI 1.0.94-3, CASS 0.10.0 healthy
   Scoped `--agent copilot_cli` inventory reports COMPLETE; capped or
   client-filtered runs report UNVERIFIED, never false COMPLETE.
 - `cass export` round-trips raw events 1:1 with `events.jsonl`
-  (19/19, 179/179, 1597/1597, exit 0, no WAL recovery needed).
+  (19/19, 179/179, 1597/1597, exit 0, no export recovery needed).
   No top-level `role`/`content`; payloads nested under `data.content`;
   timestamps monotonic and message-derived.
 - Real `assistant.message` events carry `toolRequests` plus optional
@@ -187,7 +187,7 @@ promotes normally.
 ## End-to-end validation (live CASS 0.10.0, Phase 22 corrective build, 30-day corpus)
 
 - Stock 30d review via the reinstalled canonical skill: 207 discovered
-  (COMPLETE), 207 analyzed, 0 skipped, 142 WAL-recovered; opencode +
+  (COMPLETE), 207 analyzed, 0 skipped, 142 export-recovered; opencode +
   codex + antigravity; 24 workspaces.
 - Synthesized retry signals all carry explicit period; zero lack it.
 - Pre-window-only recurrence contributes zero in-window evidence
@@ -196,14 +196,14 @@ promotes normally.
 - 0 high / 1 medium (a repeated request template with genuine in-window
   repetition — defensible under policy; one of its two cross-project
   occurrences is an assistant echo, so it is correctly capped at medium).
-- WAL recovery, report-only behavior, and install/compat architecture
+- export recovery, report-only behavior, and install/compat architecture
   unchanged.
 
 ### Earlier 30d run (pre-corrective, historical)
 
 - Stock 30d review via the reinstalled canonical skill: 207 discovered
   (COMPLETE inventory, limit 1000), 207 analyzed, 0 skipped, 142
-  WAL-recovered; opencode 142 + codex 52 + antigravity 13; 24 workspaces.
+  export-recovered; opencode 142 + codex 52 + antigravity 13; 24 workspaces.
 - The false high-confidence OH-MY-OPENCODE directive finding is gone
   (directive → `injected_system`, zero user evidence).
 - 7 medium → 1 remaining medium (a repeated request template with genuine
@@ -221,11 +221,11 @@ promotes normally.
 - Spanish corrections live (23 signals incl. genuine cases); direct
   normalized manual (22) and retry (30) signals all user-authored
   (synthesized retries derive their period from their evidence class).
-- WAL recovery, report-only behavior, and install/compat architecture
+- export recovery, report-only behavior, and install/compat architecture
   unchanged.
 
 - Stock 7d review via the reinstalled canonical skill: 13 discovered →
-  13 analyzed, 0 skipped, 11 WAL-recovered (adapter unchanged and working);
+  13 analyzed, 0 skipped, 11 export-recovered (adapter unchanged and working);
   agents antigravity + opencode, 6 workspaces — same corpus as baseline.
 - Spanish corrections now auto-detected (15 `user_correction` signals,
   including the previously-missed "NO pases todavía" class); Antigravity
@@ -249,7 +249,8 @@ promotes normally.
 - 7d review via the installed `~/.agents` copy (stock skill, no custom
   normalizer): 13 discovered → **13 analyzed, 0 skipped**, 2 agents
   (opencode, antigravity), 6 workspaces. **11 sessions were recovered**
-  from nonzero-exit CASS exports (exit 3221226505 WAL panic) via complete
+  from nonzero-exit CASS exports (exit 3221226505, the Windows teardown
+  abort described in `cass-integration.md`) via complete
   parseable `-o` files; the recovery count is reported under Coverage
   limitations. 3 medium-confidence candidates + 231 singles →
   do-not-promote. Full Inventory → Normalize → Aggregate → Report, exit 0.
@@ -264,13 +265,13 @@ promotes normally.
 ## Final fresh-session acceptance (PASSED, literal fresh OpenCode session)
 
 - OpenCode resolved the global skill from:
-  `C:\Users\lucio\.claude\skills\cass-improve-system`
+  `C:\Users\<USERNAME>\.claude\skills\cass-improve-system`
 - No development repository was inspected or used.
 - Only stock installed skill scripts were executed.
 - CASS 0.10.0 was healthy.
 - Full workflow completed: Preflight → Inventory → Normalize → Aggregate → Report.
 - 13 sessions discovered; 13 analyzed; **11 recovered** through the
-  built-in degraded CASS export/WAL recovery path; 0 skipped.
+  built-in degraded CASS export recovery path; 0 skipped.
 - 2 agents represented: antigravity and opencode. 6 workspaces represented.
 - 0 high-confidence recommendations. 3 medium/watch candidates, all
   correctly rejected after evidence verification. 231 single-occurrence
@@ -289,17 +290,22 @@ byte-identical.
 ## Cline fresh-session acceptance (PASSED, Cline 3.0.68 — already completed)
 
 - Cline recognized `cass-improve-system` via its normal native Skill mechanism.
-- Cline-visible path: `C:\Users\lucio\.cline\skills\cass-improve-system\`
+- Cline-visible path:
+  `C:\Users\<USERNAME>\.cline\skills\cass-improve-system\`
   (resolves to the canonical `.agents` tree through a parent-level
   compatibility junction; no Skill modification needed).
 - Full stock workflow ran: Preflight → Inventory → Normalize → Aggregate → Report.
-- CASS 0.10.0; 13 sessions discovered, 13 analyzed, 11 WAL-recovered,
+- CASS 0.10.0; 13 sessions discovered, 13 analyzed, 11 export-recovered,
   0 skipped; 2 agents, 6 workspaces.
 - 0 high-confidence recommendations; 3 watch-list candidates, all correctly
   rejected after evidence inspection; 231 singles remained do-not-promote.
 - No durable project/Skill/repository/learned-knowledge modifications.
 - Result: PASS — Cline discovered and executed the globally installed
   skill end-to-end with no Cline-specific changes.
+
+Local Windows usernames are anonymized in this published documentation; the
+validation runs themselves happened on real Windows machines and are
+recorded as they occurred.
 
 Distinguish: the above is the real Windows Cline E2E; filesystem/install
 behavior on Windows/Linux/macOS is covered separately by CI with isolated
@@ -320,10 +326,12 @@ was needed for the Cline acceptance test.
   incremental `cass index` (+5 conversations in 23s) → healthy. The
   graded policy (healthy / stale→refresh→proceed / uninitialized→4 /
   broken→4, never auto `--full`) is covered by regression tests.
-- 0/11 incident (resolved): a 24h review once analyzed 0/11 because every
-  session shared the live opencode WAL and CASS panicked after writing
-  complete stdout exports. Fixed by the `-o` temp-file recovery path in
-  `cass_adapter.py` (see `cass-integration.md`); the 2026-10-10 7d run
+- 0/11 incident (resolved): a 24h review once analyzed 0/11 because CASS
+   panicked after writing complete exports on every session — the Windows
+   teardown abort later diagnosed upstream as issue #519 (see
+  `cass-integration.md`; the accompanying `WAL frame salt mismatch` warning
+  is an unrelated SQLite diagnostic). Fixed by the `-o` temp-file recovery
+  path in `cass_adapter.py`; the 2026-10-10 7d run
   above proves 13/13 with 11 recoveries through the stock skill.
 - Read-only proof: SHA-256 over repo + both global skill copies identical
   before/after the reviews. Reports returned in-conversation; nothing

@@ -159,7 +159,7 @@ traceable evidence, or an explicit statement when nothing strong was found.
 | OpenCode | canonical `.agents` installation | production 24h, 7d, and 30-day reviews |
 | Claude Code | compatibility path to canonical | install-path verification |
 | Cline | native Agent Skills, compatibility path to canonical | E2E on Cline 3.0.68 |
-| Freebuff CLI | native global Skill discovery from canonical `.agents` | independent 30-day acceptance (207 sessions, 142 WAL recoveries, 0 skipped) |
+| Freebuff CLI | native global Skill discovery from canonical `.agents` | independent 30-day acceptance (207 sessions, 142 export recoveries, 0 skipped) |
 | GitHub Copilot App | native Skill discovery from canonical `.agents` | independent E2E ran the full pipeline |
 | Copilot CLI history | CASS `copilot_cli` sessions as review corpus | native 7d retest 39/39 analyzed (419 error_mention, 153 tool_result, 0 high/0 medium); tool-error precision fix and Chronicle event audit verified live |
 
@@ -223,7 +223,7 @@ human/agent judgment. Details: [docs/architecture.md](docs/architecture.md).
 - [docs/architecture.md](docs/architecture.md) — pipeline design,
   normalization, provenance, period semantics, confidence, retention.
 - [docs/cass-integration.md](docs/cass-integration.md) — CASS interface,
-  indexing, inventory, export behavior, WAL recovery, upstream limitations.
+  indexing, inventory, export behavior, export recovery, upstream limitations.
 - [docs/testing.md](docs/testing.md) — test suites, cross-platform
   validation, historical acceptance evidence.
 
@@ -237,7 +237,7 @@ Stdlib-only Python, no third-party dependencies. CI runs the suite plus an
 isolated-HOME install/verify/reinstall/uninstall exercise on Windows,
 Ubuntu, and macOS. Historical validation snapshot (v1.5.0): 147
 deterministic tests, 6/6 CI checks, and an independent Freebuff CLI
-30-day acceptance (207 sessions, 3 harnesses, 24 workspaces, 142 WAL
+30-day acceptance (207 sessions, 3 harnesses, 24 workspaces, 142 export
 recoveries, 0 skipped, COMPLETE inventory) — see
 [docs/testing.md](docs/testing.md) for details and past acceptance records.
 

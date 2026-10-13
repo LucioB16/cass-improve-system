@@ -46,12 +46,17 @@ The user must NOT need to invoke the skill inside every work session.
 
 # Phase 0 — Bootstrap and repository safety
 
+> Bootstrap note: the checked boxes in this phase are a **historical record**
+> of how this repository was originally created on the author's machine. They
+> are not a procedure a future contributor must repeat — for new work, use the
+> portable forms below and nothing here requires a specific GitHub account.
+
 - [x] Read and strictly follow `AGENTS.md`.
 - [x] Read this entire `PLAN.md` before making implementation decisions.
 - [x] Confirm the workspace is the intended `cass-improve-system` directory and inspect existing contents before overwriting anything.
 - [x] Verify Git is installed and usable.
 - [x] Verify GitHub CLI is installed with `gh --version`.
-- [x] Verify `gh auth status` and confirm the authenticated GitHub account is `LucioB16`.
+- [x] Verify `gh auth status` and confirm the authenticated GitHub account is authorized for the intended remote repository (the original bootstrap authenticated as this repository's owner, which is historical, not a requirement).
 - [x] Initialize a local Git repository if one does not already exist.
 - [x] Use `main` as the primary branch.
 - [x] Create an appropriate `.gitignore` before generating temporary/test artifacts.
@@ -61,17 +66,25 @@ The user must NOT need to invoke the skill inside every work session.
 
 ## Git/GitHub target
 
-Expected repository:
+Canonical repository for this project:
 
 `LucioB16/cass-improve-system`
 
-Preferred creation command after the local repository is ready:
+For new forks or mirrors, never hardcode an owner: derive it from the remote
+you actually intend to publish to.
 
 ```powershell
-gh repo create LucioB16/cass-improve-system --public --source . --remote origin --push
+# Portable: derive owner/name from the configured remote
+$url = git remote get-url origin
+gh repo view $url --json nameWithOwner,visibility,isFork
+
+# Generic creation form for a brand-new repository (replace the owner with
+# the authenticated account that will own it)
+gh repo create <GITHUB_OWNER>/cass-improve-system --public --source . --remote origin --push
 ```
 
-If that repository already exists, do not recreate it. Verify ownership/remotes and proceed safely.
+If that repository already exists, do not recreate it. Verify ownership/remotes
+and proceed safely.
 
 ---
 
@@ -673,7 +686,8 @@ Verified premises: Cline supports Agent Skills natively (`SKILL.md` +
 `name`/`description` frontmatter; global `~/.cline/skills/` on macOS/Linux
 and `C:\Users\USERNAME\.cline\skills\` on Windows; auto-detection —
 https://docs.cline.bot/customization/skills). No Cline fork or adapter.
-Real machine: `C:\Users\lucio\.cline\skills` is a compatibility junction
+Real machine:
+`C:\Users\<USERNAME>\.cline\skills` is a compatibility junction
 onto canonical `.agents\skills` (read-only verified, never modified).
 
 - [x] Generalize the installer to consumers `claude` + `cline`
@@ -745,7 +759,7 @@ No product-contract changes; no release yet.
 - [x] P5 report dedup: stable finding identity; render each finding once;
   multiple destinations inside the finding; dedup regression tests.
 - [x] E2E: reinstall canonical skill, manifest-verify, stock 7d review,
-  before/after comparison vs baseline, WAL recovery still working,
+  before/after comparison vs baseline, export recovery still working,
   report-only intact.
 - [x] Docs updated only where behavior changed; full suite green; atomic
   commits; push; tree clean.
@@ -778,7 +792,7 @@ fidelity, dedup, Freebuff CLI compatibility). No release yet.
   medium/high.
 - [x] Precision fixture suite (genuine vs negative cases per spec).
 - [x] E2E stock 7d vs v1.3 baseline with exact before/after numbers;
-  WAL recovery, report-only, compat unchanged.
+  export recovery, report-only, compat unchanged.
 - [x] Docs (provenance, eligibility, limits); full suite + CI green;
   atomic commits; push; tree clean.
 
