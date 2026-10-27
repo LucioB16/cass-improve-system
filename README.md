@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/cass-improve-system-icon.png" alt="cass-improve-system icon" width="140" />
+  <img src="assets/cass-improve-system-icon.png" alt="cass-improve-system icon" width="118" />
 </p>
 
 <h1 align="center">cass-improve-system</h1>
@@ -11,8 +11,13 @@
 <p align="center">
   <a href="https://github.com/LucioB16/cass-improve-system/actions/workflows/ci.yml"><img src="https://github.com/LucioB16/cass-improve-system/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
-  <a href="https://github.com/LucioB16/cass-improve-system/issues"><img src="https://img.shields.io/github/issues/LucioB16/cass-improve-system" alt="GitHub issues" /></a>
 </p>
+
+| Find recurring friction | Ground it in evidence | Decide what to improve |
+| :-- | :-- | :-- |
+| Review CASS-visible sessions across agents and projects. | Trace repeated corrections, debugging loops and manual steps. | Get report-first candidates for automation, skills and process changes. |
+
+**No hooks in past sessions. No automatic application of proposed changes.** The skill analyzes existing histories and presents findings for review.
 
 ## Overview
 
@@ -27,7 +32,7 @@ and CASS-visible agent histories** — with no per-session hooks and no need
 to invoke anything inside the original work sessions — and recommends
 actionable improvements backed by traceable evidence.
 
-## Quick Start
+## Quick start
 
 ### Requirements
 
